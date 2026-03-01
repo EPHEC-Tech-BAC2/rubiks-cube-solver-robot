@@ -1,0 +1,6 @@
+numpy
+opencv-python
+pyserial
+kociemba
+threading
+# pip install -r requirements.txt
