@@ -13,5 +13,5 @@ Initialisation du projet et mise en place des bases logicielles et matérielles 
 **État actuel :**  
 - Structure du projet créée 
 - Librairies MicroPython (ssd1306, servo, mfrc522)  
-- Dépendances Python ajoutées (numpy, opencv-python, pyserial, kociemba, threading)  
+- Dépendances Python ajoutées (numpy, opencv-python, pyserial, kociemba)  
 - Début de la conception mécanique et du PCB
