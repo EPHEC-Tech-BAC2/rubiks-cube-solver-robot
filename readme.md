@@ -16,3 +16,4 @@ Initialisation du projet et mise en place des bases logicielles et matérielles 
 - Dépendances Python ajoutées (numpy, opencv-python, pyserial, kociemba)  
 - Début de la conception mécanique et du PCB  
 - Test pour vérifier la communication Bluetooth entre le Pico et le PC avant l’intégration dans le projet
+- Lancer l'interface et se connecter au Pico
