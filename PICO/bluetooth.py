@@ -13,6 +13,15 @@ class Bluetooth:
         except:
             pass
 
+    def log(self, text):
+        self.send("LOG", text)
+
+    def ok(self, tag):
+        self.send("OK", tag)
+
+    def err(self, reason):
+        self.send("ERR", reason)
+
     def readline(self):
         if self.uart.any():
             raw = self.uart.readline()

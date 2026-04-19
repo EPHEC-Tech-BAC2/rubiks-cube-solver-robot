@@ -54,6 +54,11 @@ class BTUart:
             raise RuntimeError("Non connecté")
         self.ser.write(make_msg(tag, payload).encode())
 
+    def send_raw(self, text):
+        if not self.is_connected():
+            raise RuntimeError("Non connecté")
+        self.ser.write((text + "\n").encode())
+
     def is_connected(self):
         return self.ser is not None and self.ser.is_open
 
