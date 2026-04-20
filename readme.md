@@ -18,3 +18,4 @@ Initialisation du projet et mise en place des bases logicielles et matérielles 
 - Test pour vérifier la communication Bluetooth entre le Pico et le PC avant l’intégration dans le projet
 - Lancer l'interface et se connecter au Pico
 - Les boutons Attraper/Relâcher envoient au Pico, le RFID s'affiche, le chrono tourne.
+- Camera dans l'interface + cube mis a jour apres chaque capture

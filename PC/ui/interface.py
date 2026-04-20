@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
+import threading
 import time
 import sys
 from pathlib import Path
@@ -7,6 +8,15 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from bluetooth.bt_uart import BTUart, list_ports
+from graphique.cube_view import CubeView
+from vision.color_detection import FACE_ORDER
+
+try:
+    import cv2
+    from PIL import Image, ImageTk
+    HAS_CV = True
+except ImportError:
+    HAS_CV = False
 
 C_BG     = "#0a0a0f"
 C_BG2    = "#0f0f1a"
@@ -45,15 +55,18 @@ def _btn(parent, text, cmd, fg=C_CYAN):
 
 class Interface:
     def __init__(self):
-        self.bt = BTUart()
-        self.timer_running = False
-        self.timer_start   = 0
-        self.elapsed       = 0
+        self.bt             = BTUart()
+        self.faces          = {}
+        self.timer_running  = False
+        self.timer_start    = 0
+        self.elapsed        = 0
+        self.camera_active  = False
+        self._cap           = None
 
         self.root = tk.Tk()
         self.root.title("Rubik Robot")
         self.root.configure(bg=C_BG)
-        self.root.geometry("1000x600")
+        self.root.geometry("1200x700")
 
         self._build()
         self._poll()
@@ -71,14 +84,19 @@ class Interface:
         left = tk.Frame(body, bg=C_BG, width=210)
         left.pack(side="left", fill="y", padx=(0, 8))
         left.pack_propagate(False)
-
         self._build_bt(left)
         self._build_controls(left)
         self._build_rfid(left)
         self._build_timer(left)
 
-        right = tk.Frame(body, bg=C_BG)
-        right.pack(side="left", fill="both", expand=True)
+        center = tk.Frame(body, bg=C_BG)
+        center.pack(side="left", fill="both", expand=True, padx=(0, 8))
+        self._build_camera(center)
+        self._build_cube(center)
+
+        right = tk.Frame(body, bg=C_BG, width=260)
+        right.pack(side="left", fill="y")
+        right.pack_propagate(False)
         self._build_log(right)
 
     def _build_bt(self, parent):
@@ -122,7 +140,7 @@ class Interface:
         p.pack(fill="x", pady=(0, 8), padx=2)
         _section(p, "CONTRÔLES")
 
-        _btn(p, "CAPTURER 6 FACES", lambda: None, C_CYAN).pack(
+        _btn(p, "CAPTURER 6 FACES", self._start_capture, C_CYAN).pack(
             fill="x", padx=8, pady=2)
         _btn(p, "RÉSOUDRE", lambda: None, C_YELLOW).pack(
             fill="x", padx=8, pady=2)
@@ -135,7 +153,7 @@ class Interface:
 
         row = tk.Frame(p, bg=C_PANEL)
         row.pack(fill="x", padx=8, pady=4)
-        _btn(row, "ATTRAPER", lambda: self._send("GRAB"),   C_CYAN).pack(
+        _btn(row, "ATTRAPER", lambda: self._send("GRAB"),    C_CYAN).pack(
             side="left", expand=True, fill="x", padx=(0, 2))
         _btn(row, "RELÂCHER", lambda: self._send("RELEASE"), C_DIM).pack(
             side="left", expand=True, fill="x")
@@ -168,8 +186,7 @@ class Interface:
                                       bg=C_BG3, highlightthickness=0)
         self._rfid_badge.pack(padx=8, pady=(2, 8))
         self._rfid_badge.create_text(95, 13, text="BADGE NON PRÉSENTÉ",
-                                      fill=C_DIM, font=FONT_S,
-                                      tags="badge")
+                                      fill=C_DIM, font=FONT_S, tags="badge")
 
     def _build_timer(self, parent):
         p = _panel(parent)
@@ -186,6 +203,28 @@ class Interface:
         _btn(row, "▶", self._timer_start, C_GREEN).pack(side="left", padx=1)
         _btn(row, "■", self._timer_stop,  C_RED).pack(side="left", padx=1)
         _btn(row, "↺", self._timer_reset, C_DIM).pack(side="left", padx=1)
+
+    def _build_camera(self, parent):
+        p = _panel(parent)
+        p.pack(fill="x", pady=(0, 8))
+        _section(p, "CAMERA LIVE")
+
+        self.cam_label = tk.Label(p, bg="#000000",
+                                   text="Caméra inactive",
+                                   fg=C_DIM, font=FONT_S,
+                                   width=50, height=9)
+        self.cam_label.pack(padx=8, pady=(0, 4))
+
+        _btn(p, "▶  ACTIVER CAMÉRA", self._toggle_camera,
+             C_CYAN).pack(padx=8, pady=(0, 8))
+
+    def _build_cube(self, parent):
+        p = _panel(parent)
+        p.pack(fill="both", expand=True)
+        _section(p, "VISUALISATION 6 FACES")
+
+        self.cube_view = CubeView(p, cell_size=30, bg=C_BG2)
+        self.cube_view.pack(padx=8, pady=(0, 8))
 
     def _build_log(self, parent):
         tk.Label(parent, text="▸ LOG", font=FONT_B,
@@ -265,6 +304,95 @@ class Interface:
         elif tag == "ERR":
             self._log("Erreur : {}".format(payload), "err")
 
+    # Camera
+    def _toggle_camera(self):
+        if not HAS_CV:
+            messagebox.showwarning("Caméra",
+                "Installe opencv-python et pillow")
+            return
+        if self.camera_active:
+            self.camera_active = False
+            if self._cap:
+                self._cap.release()
+                self._cap = None
+            self.cam_label.config(image="", text="Caméra inactive",
+                                   fg=C_DIM, width=50, height=9)
+        else:
+            self._cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+            if not self._cap.isOpened():
+                messagebox.showerror("Caméra", "Caméra introuvable")
+                return
+            self.camera_active = True
+            threading.Thread(target=self._camera_loop, daemon=True).start()
+
+    def _camera_loop(self):
+        from vision.color_detection import detect_face_colors
+        import numpy as np
+
+        X1, Y1, X2, Y2 = 160, 80, 400, 320
+        SQ = (X2 - X1) // 3
+        centers = []
+        for r in range(3):
+            for c in range(3):
+                cx = X1 + c * SQ + SQ // 2
+                cy = Y1 + r * SQ + SQ // 2
+                centers.append((cx, cy))
+
+        while self.camera_active and self._cap:
+            ret, frame = self._cap.read()
+            if not ret:
+                break
+            frame = cv2.flip(frame, 1)
+
+            # overlay grille sur la zone de capture
+            cv2.rectangle(frame, (X1, Y1), (X2, Y2), (0, 212, 255), 2)
+            for r in range(3):
+                for c in range(3):
+                    cv2.rectangle(frame,
+                                  (X1 + c*SQ, Y1 + r*SQ),
+                                  (X1 + (c+1)*SQ, Y1 + (r+1)*SQ),
+                                  (0, 100, 150), 1)
+
+            frame_resized = cv2.resize(frame, (400, 220))
+            img = Image.fromarray(cv2.cvtColor(frame_resized,
+                                               cv2.COLOR_BGR2RGB))
+            imgtk = ImageTk.PhotoImage(img)
+            self.root.after(0, lambda i=imgtk: self._update_cam(i))
+            time.sleep(0.033)
+
+    def _update_cam(self, imgtk):
+        self.cam_label.config(image=imgtk, text="",
+                               width=400, height=220)
+        self.cam_label.imgtk = imgtk
+
+    # Capture faces
+    def _start_capture(self):
+        threading.Thread(target=self._run_capture, daemon=True).start()
+
+    def _run_capture(self):
+        try:
+            from vision.camera import capture_6_faces
+
+            def on_face(face_name, colors):
+                self.root.after(0, lambda fn=face_name, c=colors:
+                                self._on_face_captured(fn, c))
+
+            faces = capture_6_faces(on_face_captured=on_face)
+            if faces:
+                self.faces = faces
+                self.root.after(0, lambda: (
+                    self.faces_lbl.config(text="Faces : 6 / 6"),
+                    self._log("6 faces capturées", "ok")
+                ))
+        except Exception as e:
+            self.root.after(0, lambda: messagebox.showerror("Vision", str(e)))
+
+    def _on_face_captured(self, face_name, colors):
+        self.cube_view.update_face(face_name, colors)
+        n = sum(1 for f in FACE_ORDER if f in self.faces) + 1
+        self.faces_lbl.config(text="Faces : {} / 6".format(n))
+        self._log("Face {} capturée".format(face_name))
+
     # Timer
     def _timer_start(self):
         if not self.timer_running:
@@ -307,6 +435,7 @@ class Interface:
         self.root.mainloop()
 
     def _on_close(self):
+        self.camera_active = False
         self.bt.disconnect()
         self.root.destroy()
 

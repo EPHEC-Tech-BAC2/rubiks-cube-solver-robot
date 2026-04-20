@@ -2,7 +2,7 @@ from machine import UART, Pin
 
 
 class Bluetooth:
-    def __init__(self, uart_id=0, baudrate=38400, tx_pin=0, rx_pin=1):
+    def __init__(self, uart_id=0, baudrate=38400, tx_pin=12, rx_pin=13):
         self.uart = UART(uart_id, baudrate=baudrate,
                          tx=Pin(tx_pin), rx=Pin(rx_pin))
 
