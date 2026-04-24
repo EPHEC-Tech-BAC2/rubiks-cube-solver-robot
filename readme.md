@@ -19,3 +19,4 @@ Initialisation du projet et mise en place des bases logicielles et matérielles 
 - Lancer l'interface et se connecter au Pico
 - Les boutons Attraper/Relâcher envoient au Pico, le RFID s'affiche, le chrono tourne.
 - Camera dans l'interface + cube mis a jour apres chaque capture
+- Capturer 6 faces, resoudre, envoyer au pico, voir la progression en direct
