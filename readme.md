@@ -21,3 +21,4 @@ Initialisation du projet et mise en place des bases logicielles et matérielles 
 - Camera dans l'interface + cube mis a jour apres chaque capture
 - Capturer 6 faces, resoudre, envoyer au pico, voir la progression en direct
 - Utilisation de l'écran OLED pour afficher l’état et les messages du robot.
+- Lecture de badges RFID pour l’identification.
