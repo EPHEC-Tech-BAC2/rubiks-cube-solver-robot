@@ -167,8 +167,8 @@ class Interface:
         self.solution      = None
         self._cap          = None
         self._cam_alive    = False
-        self._last_frame   = None   
-        self._scan_idx     = 0      
+        self._last_frame   = None
+        self._scan_idx     = 0
 
         self.timer_running = False
         self.timer_start   = 0
@@ -651,6 +651,7 @@ class Interface:
         s = t % 60
         self.timer_lbl.config(
             text="{:02d}:{:04.1f}".format(m, s))
+
     # Log
 
     def _log(self, text, style=""):
@@ -683,3 +684,7 @@ class Interface:
 
 def run_app():
     Interface().run()
+
+
+if __name__ == "__main__":
+    run_app()

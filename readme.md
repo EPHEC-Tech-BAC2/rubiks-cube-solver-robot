@@ -22,3 +22,4 @@ Initialisation du projet et mise en place des bases logicielles et matérielles 
 - Capturer 6 faces, resoudre, envoyer au pico, voir la progression en direct
 - Utilisation de l'écran OLED pour afficher l’état et les messages du robot.
 - Lecture de badges RFID pour l’identification.
+- Mise en place de l’application Tkinter avec l’affichage du cube, la caméra live, le Bluetooth, le RFID, le chronomètre et le journal d’événements.
