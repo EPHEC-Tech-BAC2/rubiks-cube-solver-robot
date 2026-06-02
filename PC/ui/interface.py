@@ -4,95 +4,53 @@ import threading
 import time
 import math
 import sys
+import os
 from pathlib import Path
 
-sys.path.append(str(Path(__file__).resolve().parents[1]))
+try:
+    from PIL import Image, ImageTk
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from bluetooth.bt_uart import BTUart, list_ports
 from graphique.cube_view import CubeView
-from vision.color_detection import FACE_ORDER, detect_face_colors
+from vision.camera import OverheadCamera
+from vision.color_detection import FACE_ORDER, build_kociemba_string
+from solver.cube_solver import solve
+from solver.cube_simulator import CubeState
 
-try:
-    import cv2
-    import numpy as np
-    from PIL import Image, ImageTk
-    HAS_CV = True
-except ImportError:
-    HAS_CV = False
+BG        = "#1a1a2e"
+BG2       = "#16213e"
+FG        = "#e0e0e0"
+ACCENT    = "#0f3460"
+GREEN     = "#00c853"
+RED       = "#ff1744"
+ORANGE    = "#ff9100"
+BLUE_L    = "#448aff"
+PURPLE    = "#7e57c2"
+FONT      = ("Segoe UI", 10)
+FONT_B    = ("Segoe UI", 10, "bold")
+FONT_BIG  = ("Segoe UI", 14, "bold")
+FONT_MONO = ("Consolas", 10)
+FONT_TIME = ("Consolas", 22, "bold")
 
-C_BG     = "#07070f"
-C_BG2    = "#0d0d1a"
-C_BG3    = "#13131f"
-C_PANEL  = "#10101c"
-C_CYAN   = "#00d4ff"
-C_GREEN  = "#00ff88"
-C_RED    = "#ff3355"
-C_ORANGE = "#ff6b00"
-C_YELLOW = "#ffd700"
-C_TEXT   = "#e2e8f0"
-C_DIM    = "#3a4560"
-C_BORDER = "#1a1a2e"
-FONT_B   = ("Courier New", 10, "bold")
-FONT_S   = ("Courier New", 9)
-FONT_T   = ("Courier New", 8)
+AUTO_CAPTURE_DELAY = 5
 
-CAM_W, CAM_H = 480, 300
-X1, Y1, X2, Y2 = 150, 60, 330, 240
-SQ = (X2 - X1) // 3
-
-FACE_LABELS = {
-    "U": "Haut (blanc)",
-    "R": "Droite (rouge)",
-    "F": "Avant (vert)",
-    "D": "Bas (jaune)",
-    "L": "Gauche (orange)",
-    "B": "Arrière (bleu)",
-}
-
-
-def _grid_centers():
-    pts = []
-    for r in range(3):
-        for c in range(3):
-            cx = X1 + c * SQ + SQ // 2
-            cy = Y1 + r * SQ + SQ // 2
-            pts.append((cx, cy))
-    return pts
-
-CENTERS = _grid_centers()
-
-
-def _panel(parent, **kw):
-    return tk.Frame(parent, bg=C_PANEL,
-                    highlightbackground=C_BORDER,
-                    highlightthickness=1, **kw)
-
-def _sec(parent, title, fg=C_CYAN):
-    f = tk.Frame(parent, bg=C_PANEL)
-    tk.Label(f, text="▸ " + title, font=FONT_B,
-             fg=fg, bg=C_PANEL).pack(side="left")
-    tk.Frame(f, bg=C_BORDER, height=1).pack(
-        side="left", fill="x", expand=True, padx=(6, 0))
-    return f
-
-def _btn(parent, text, cmd, fg=C_CYAN):
-    return tk.Button(parent, text=text, command=cmd,
-                     bg=C_BG3, fg=fg, font=FONT_B,
-                     relief="flat", activebackground=fg,
-                     activeforeground=C_BG,
-                     padx=8, pady=5, cursor="hand2")
 
 class SplashScreen:
     def __init__(self, root, on_done):
-        self.root    = root
+        self.root = root
         self.on_done = on_done
-        self._angle  = 0
-        self._prog   = 0.0
-        self._phase  = 0
+        self._angle = 0
+        self._prog = 0.0
+        self._phase = 0
 
-        self.frame = tk.Frame(root, bg=C_BG)
+        self.frame = tk.Frame(root, bg="#0a0a18")
         self.frame.place(relx=0, rely=0, relwidth=1, relheight=1)
-        self.canvas = tk.Canvas(self.frame, bg=C_BG, highlightthickness=0)
+        self.canvas = tk.Canvas(self.frame, bg="#0a0a18", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
         self._tick()
 
@@ -102,8 +60,7 @@ class SplashScreen:
             self._prog = min(1.0, self._prog + 0.012)
             if self._prog >= 1.0:
                 self._phase = 1
-                self.frame.after(700,
-                    lambda: setattr(self, '_phase', 2))
+                self.frame.after(700, lambda: setattr(self, "_phase", 2))
         elif self._phase == 2:
             self._prog = max(0.0, self._prog - 0.07)
             if self._prog <= 0:
@@ -116,574 +73,506 @@ class SplashScreen:
     def _draw(self):
         c = self.canvas
         c.delete("all")
-        w = self.root.winfo_width()  or 1400
+        w = self.root.winfo_width() or 1400
         h = self.root.winfo_height() or 800
         cx, cy = w // 2, h // 2
 
         for x in range(0, w, 50):
-            c.create_line(x, 0, x, h, fill="#0c0c18")
+            c.create_line(x, 0, x, h, fill="#101020")
         for y in range(0, h, 50):
-            c.create_line(0, y, w, y, fill="#0c0c18")
+            c.create_line(0, y, w, y, fill="#101020")
 
-        for i, (col, wd) in enumerate(
-                [(C_CYAN, 2), (C_ORANGE, 1), (C_BORDER, 1)]):
+        for i, (col, wd) in enumerate([(BLUE_L, 2), (ORANGE, 1), ("#1e1e30", 1)]):
             r = 110 + i * 55
             a = self._angle + i * 40
             x1 = cx + r * math.cos(math.radians(a))
             y1 = cy + r * math.sin(math.radians(a))
-            c.create_oval(cx-r, cy-r, cx+r, cy+r,
-                          outline=col, width=wd)
+            c.create_oval(cx-r, cy-r, cx+r, cy+r, outline=col, width=wd)
             if i < 2:
-                c.create_oval(x1-6, y1-6, x1+6, y1+6,
-                              fill=col, outline="")
+                c.create_oval(x1-6, y1-6, x1+6, y1+6, fill=col, outline="")
 
         c.create_text(cx, cy - 40, text="RUBIK",
-                      font=("Courier New", 64, "bold"), fill=C_CYAN)
-        c.create_text(cx, cy + 40, text="ROBOT",
-                      font=("Courier New", 64, "bold"), fill=C_ORANGE)
-        c.create_text(cx, cy + 110,
-                      text="CONTROL SYSTEM  v1.0",
-                      font=("Courier New", 13), fill=C_DIM)
+                      font=("Segoe UI", 54, "bold"), fill=BLUE_L)
+        c.create_text(cx, cy + 30, text="ROBOT",
+                      font=("Segoe UI", 54, "bold"), fill=ORANGE)
+        c.create_text(cx, cy + 100, text="CONTROL SYSTEM",
+                      font=("Segoe UI", 14), fill="#778")
 
         bw = 460
         bx = cx - bw // 2
         by = cy + 155
-        c.create_rectangle(bx, by, bx+bw, by+5,
-                            fill=C_BG3, outline=C_BORDER)
-        c.create_rectangle(bx, by,
-                            bx + int(bw * self._prog), by+5,
-                            fill=C_CYAN, outline="")
+        c.create_rectangle(bx, by, bx + bw, by + 5, fill="#1c1c2c", outline="#2d2d40")
+        c.create_rectangle(bx, by, bx + int(bw * self._prog), by + 5, fill=BLUE_L, outline="")
         c.create_text(cx, by + 18,
-                      text="INITIALISATION... {}%".format(
-                          int(self._prog * 100)),
-                      font=("Courier New", 9), fill=C_DIM)
+                      text="INITIALISATION... {}%".format(int(self._prog * 100)),
+                      font=("Segoe UI", 9), fill="#667")
 
-# Interface 
 
-class Interface:
-    def __init__(self):
-        self.bt            = BTUart()
-        self.faces         = {}
-        self.solution      = None
-        self._cap          = None
-        self._cam_alive    = False
-        self._last_frame   = None
-        self._scan_idx     = 0
+class App:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Robot Rubik's Cube — Controle")
+        self.root.configure(bg=BG)
+        self.root.minsize(1200, 720)
+
+        self.bt = BTUart()
+        self.cam = OverheadCamera()
+        self.cube_state = CubeState()
+        self.captured_faces = {}
+        self.solution_moves = []
+        self.solution_str = ""
+        self.solving = False
+        self.scanning = False
+        self.move_index = 0
 
         self.timer_running = False
-        self.timer_start   = 0
-        self.elapsed       = 0
+        self.timer_start = 0
+        self.timer_elapsed = 0.0
 
-        self.root = tk.Tk()
-        self.root.title("Rubik Robot — Control System")
-        self.root.configure(bg=C_BG)
-        self.root.state("zoomed")
-        self.root.update()
+        self.rfid_id = "—"
+        self.rfid_status = False
 
-        SplashScreen(self.root, self._build)
+        self._build_ui()
+        self._poll_bt()
+        self._update_timer_display()
 
-    # Build
-
-    def _build(self):
-        hdr = tk.Frame(self.root, bg=C_BG, height=46)
-        hdr.pack(fill="x")
-        hdr.pack_propagate(False)
-        tk.Label(hdr, text="◈  RUBIK ROBOT  CONTROL SYSTEM",
-                 font=("Courier New", 15, "bold"),
-                 bg=C_BG, fg=C_CYAN).pack(side="left", padx=20, pady=10)
-
-        self._dot_c = tk.Canvas(hdr, width=14, height=14,
-                                 bg=C_BG, highlightthickness=0)
-        self._dot_c.pack(side="right", padx=(0, 8), pady=16)
-        self._dot = self._dot_c.create_oval(1, 1, 13, 13, fill=C_DIM)
-        self._dot_lbl = tk.Label(hdr, text="OFFLINE",
-                                  font=FONT_T, bg=C_BG, fg=C_DIM)
-        self._dot_lbl.pack(side="right", padx=(0, 4), pady=16)
-
-        tk.Frame(self.root, bg=C_CYAN, height=1).pack(fill="x")
-
-        body = tk.Frame(self.root, bg=C_BG)
-        body.pack(fill="both", expand=True, padx=8, pady=8)
-
-        # colonne gauche
-        left = tk.Frame(body, bg=C_BG, width=200)
-        left.pack(side="left", fill="y", padx=(0, 8))
-        left.pack_propagate(False)
-        self._build_bt(left)
-        self._build_rfid(left)
-        self._build_timer(left)
-
-        # colonne centre : caméra + cube
-        center = tk.Frame(body, bg=C_BG)
-        center.pack(side="left", fill="both", expand=True, padx=(0, 8))
-        self._build_camera(center)
-        self._build_cube(center)
-
-        # colonne droite : contrôles + solution + log
-        right = tk.Frame(body, bg=C_BG, width=280)
-        right.pack(side="left", fill="y")
-        right.pack_propagate(False)
-        self._build_controls(right)
-        self._build_solution(right)
-        self._build_log(right)
-
-        self.root.after(500, self._start_camera)
-        self._poll()
-
-    def _build_bt(self, parent):
-        p = _panel(parent)
-        p.pack(fill="x", pady=(0, 8), padx=2)
-        _sec(p, "BLUETOOTH").pack(fill="x", padx=8, pady=(8, 4))
-
-        row = tk.Frame(p, bg=C_PANEL)
-        row.pack(fill="x", padx=8, pady=2)
-        tk.Label(row, text="PORT", font=FONT_T,
-                 fg=C_DIM, bg=C_PANEL).pack(side="left")
-        self.port_var = tk.StringVar()
-        ports = list_ports()
-        box = ttk.Combobox(row, textvariable=self.port_var, width=9)
-        box["values"] = ports
-        if ports:
-            box.current(0)
-        box.pack(side="right")
-
-        row2 = tk.Frame(p, bg=C_PANEL)
-        row2.pack(fill="x", padx=8, pady=2)
-        tk.Label(row2, text="BAUD", font=FONT_T,
-                 fg=C_DIM, bg=C_PANEL).pack(side="left")
-        self.baud_var = tk.StringVar(value="38400")
-        tk.Entry(row2, textvariable=self.baud_var, width=8,
-                 bg=C_BG3, fg=C_CYAN, relief="flat",
-                 font=FONT_T).pack(side="right")
-
-        self.conn_btn = _btn(p, "⬡  CONNECTER",
-                              self._toggle_bt, C_GREEN)
-        self.conn_btn.pack(fill="x", padx=8, pady=(6, 8))
-
-    def _build_rfid(self, parent):
-        p = _panel(parent)
-        p.pack(fill="x", pady=(0, 8), padx=2)
-        _sec(p, "RFID").pack(fill="x", padx=8, pady=(8, 4))
-
-        r1 = tk.Frame(p, bg=C_PANEL)
-        r1.pack(fill="x", padx=8, pady=1)
-        tk.Label(r1, text="STATUT", font=FONT_T,
-                 fg=C_DIM, bg=C_PANEL).pack(side="left")
-        self.rfid_status = tk.Label(r1, text="EN ATTENTE",
-                                     font=FONT_T, fg=C_DIM, bg=C_PANEL)
-        self.rfid_status.pack(side="right")
-
-        r2 = tk.Frame(p, bg=C_PANEL)
-        r2.pack(fill="x", padx=8, pady=1)
-        tk.Label(r2, text="ID CARTE", font=FONT_T,
-                 fg=C_DIM, bg=C_PANEL).pack(side="left")
-        self.rfid_id = tk.Label(r2, text="—",
-                                 font=("Courier New", 9, "bold"),
-                                 fg=C_CYAN, bg=C_PANEL)
-        self.rfid_id.pack(side="right")
-
-        self._rfid_badge = tk.Canvas(p, height=26,
-                                      bg=C_BG3, highlightthickness=0)
-        self._rfid_badge.pack(fill="x", padx=8, pady=(4, 8))
-        self._rfid_badge.bind("<Configure>", self._redraw_badge)
-        self._badge_txt = "BADGE NON PRÉSENTÉ"
-        self._badge_col = C_DIM
-        self._badge_bg  = C_BG3
-
-    def _redraw_badge(self, e=None):
-        c = self._rfid_badge
-        w = c.winfo_width() or 180
-        c.delete("all")
-        c.create_rectangle(0, 0, w, 26,
-                            fill=self._badge_bg, outline="")
-        c.create_text(w//2, 13, text=self._badge_txt,
-                      fill=self._badge_col, font=FONT_T)
-
-    def _set_badge(self, txt, col, bg):
-        self._badge_txt = txt
-        self._badge_col = col
-        self._badge_bg  = bg
-        self._redraw_badge()
-
-    def _build_timer(self, parent):
-        p = _panel(parent)
-        p.pack(fill="x", padx=2)
-        _sec(p, "CHRONOMÈTRE").pack(fill="x", padx=8, pady=(8, 4))
-        self.timer_lbl = tk.Label(p, text="00:00.0",
-                                   font=("Courier New", 32, "bold"),
-                                   fg=C_ORANGE, bg=C_PANEL)
-        self.timer_lbl.pack(pady=(2, 8))
-
-    def _build_camera(self, parent):
-        p = _panel(parent)
-        p.pack(fill="x", pady=(0, 6))
-        _sec(p, "CAMERA LIVE").pack(fill="x", padx=8, pady=(8, 4))
-
-        self.cam_label = tk.Label(p, bg="#000000",
-                                   text="Démarrage caméra...",
-                                   fg=C_DIM, font=FONT_S,
-                                   width=CAM_W, height=CAM_H)
-        self.cam_label.pack(padx=8, pady=(0, 4))
-
-        # indicateur face à scanner
-        self.scan_hint = tk.Label(p,
-            text="Face 1/6 — {} — Appuie sur SCANNER".format(
-                FACE_LABELS[FACE_ORDER[0]]),
-            fg=C_CYAN, bg=C_PANEL, font=FONT_S)
-        self.scan_hint.pack(pady=(0, 4))
-
-        _btn(p, "📷  SCANNER CETTE FACE",
-             self._scan_face, C_GREEN).pack(
-            fill="x", padx=8, pady=(0, 6))
-
-        _btn(p, "↺  RECOMMENCER",
-             self._reset_scan, C_DIM).pack(
-            fill="x", padx=8, pady=(0, 8))
-
-    def _build_cube(self, parent):
-        p = _panel(parent)
-        p.pack(fill="both", expand=True)
-        _sec(p, "6 FACES EN DIRECT").pack(
-            fill="x", padx=8, pady=(8, 6))
-
-        self.cube_view = CubeView(p, cell_size=34, bg=C_BG2)
-        self.cube_view.pack(pady=(0, 6))
-
-        self.faces_lbl = tk.Label(p, text="Faces capturées : 0 / 6",
-                                   font=FONT_T, fg=C_DIM, bg=C_PANEL)
-        self.faces_lbl.pack(pady=(0, 6))
-
-    def _build_controls(self, parent):
-        p = _panel(parent)
-        p.pack(fill="x", pady=(0, 8), padx=2)
-        _sec(p, "CONTRÔLES").pack(fill="x", padx=8, pady=(8, 6))
-
-        _btn(p, "RÉSOUDRE",
-             self._solve, C_YELLOW).pack(
-            fill="x", padx=8, pady=2)
-        _btn(p, "ENVOYER AU PICO",
-             self._send_solution, C_ORANGE).pack(
-            fill="x", padx=8, pady=(2, 8))
-
-    def _build_solution(self, parent):
-        p = _panel(parent)
-        p.pack(fill="x", pady=(0, 8), padx=2)
-        _sec(p, "SOLUTION KOCIEMBA").pack(
-            fill="x", padx=8, pady=(8, 4))
-
-        self.sol_text = tk.Label(p, text="—",
-                                  fg=C_GREEN, bg=C_PANEL,
-                                  font=("Courier New", 9),
-                                  wraplength=256,
-                                  justify="left", anchor="w")
-        self.sol_text.pack(fill="x", padx=8)
-
-        self.moves_lbl = tk.Label(p, text="",
-                                   fg=C_ORANGE, bg=C_PANEL,
-                                   font=("Courier New", 9, "bold"))
-        self.moves_lbl.pack(anchor="w", padx=8, pady=(2, 4))
-
-        tk.Label(p, text="PROGRESSION", font=FONT_T,
-                 fg=C_DIM, bg=C_PANEL).pack(anchor="w", padx=8)
-        self._prog_cv = tk.Canvas(p, height=8,
-                                   bg=C_BG3, highlightthickness=0)
-        self._prog_cv.pack(fill="x", padx=8, pady=2)
-        self._prog_rect = self._prog_cv.create_rectangle(
-            0, 0, 0, 8, fill=C_CYAN, outline="")
-        self.prog_lbl = tk.Label(p, text="",
-                                  fg=C_CYAN, bg=C_PANEL, font=FONT_T)
-        self.prog_lbl.pack(anchor="w", padx=8, pady=(0, 8))
-
-    def _build_log(self, parent):
-        p = _panel(parent)
-        p.pack(fill="both", expand=True, padx=2)
-        _sec(p, "LOG").pack(fill="x", padx=8, pady=(8, 4))
-        self.log = tk.Text(p, bg=C_BG2, fg=C_TEXT,
-                           font=("Courier New", 8),
-                           relief="flat", state="disabled")
-        self.log.pack(fill="both", expand=True, padx=8, pady=(0, 8))
-        self.log.tag_configure("ok",  foreground=C_GREEN)
-        self.log.tag_configure("err", foreground=C_RED)
-        self.log.tag_configure("tx",  foreground=C_ORANGE)
-        self.log.tag_configure("dim", foreground=C_DIM)
-
-    # Caméra
-
-    def _start_camera(self):
-        if not HAS_CV:
-            self.cam_label.config(text="opencv-python non installé")
-            return
-        self._cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-        if not self._cap.isOpened():
-            self._cap = cv2.VideoCapture(0)
-        if not self._cap.isOpened():
-            self.cam_label.config(text="Caméra introuvable")
-            return
-        self._cam_alive = True
-        threading.Thread(target=self._camera_loop, daemon=True).start()
-
-    def _camera_loop(self):
-        while self._cam_alive and self._cap:
-            ret, frame = self._cap.read()
-            if not ret:
-                break
-            frame = cv2.flip(frame, 1)
-
-            # grille de détection
-            cv2.rectangle(frame, (X1, Y1), (X2, Y2),
-                          (0, 212, 255), 2)
-            for r in range(3):
-                for c in range(3):
-                    cv2.rectangle(
-                        frame,
-                        (X1 + c*SQ, Y1 + r*SQ),
-                        (X1 + (c+1)*SQ, Y1 + (r+1)*SQ),
-                        (0, 90, 140), 1)
-            for (px, py) in CENTERS:
-                cv2.circle(frame, (px, py), 3,
-                           (0, 212, 255), -1)
-
-            self._last_frame = frame.copy()
-
-            frame_r = cv2.resize(frame, (CAM_W, CAM_H))
-            img = Image.fromarray(
-                cv2.cvtColor(frame_r, cv2.COLOR_BGR2RGB))
-            imgtk = ImageTk.PhotoImage(img)
-            self.root.after(
-                0, lambda i=imgtk: self._update_cam(i))
-            time.sleep(0.033)
-
-    def _update_cam(self, imgtk):
-        self.cam_label.config(image=imgtk, text="",
-                               width=CAM_W, height=CAM_H)
-        self.cam_label.imgtk = imgtk
-
-    # Scan face
-
-    def _scan_face(self):
-        if self._last_frame is None:
-            messagebox.showwarning("Caméra", "Caméra non disponible")
-            return
-        if self._scan_idx >= len(FACE_ORDER):
-            messagebox.showinfo("Scan", "6 faces déjà capturées")
-            return
-
-        frame_hsv = cv2.cvtColor(self._last_frame,
-                                  cv2.COLOR_BGR2HSV)
-        colors = detect_face_colors(frame_hsv, CENTERS)
-
-        if "?" in colors:
-            messagebox.showwarning(
-                "Détection",
-                "Couleurs non détectées, repositionne le cube")
-            return
-
-        face_name = FACE_ORDER[self._scan_idx]
-        self.faces[face_name] = list(colors)
-        self.cube_view.update_face(face_name, colors)
-        self._scan_idx += 1
-
-        n = self._scan_idx
-        self.faces_lbl.config(
-            text="Faces capturées : {} / 6".format(n))
-        self._log("Face {} : {}".format(face_name, colors))
-
-        if n < len(FACE_ORDER):
-            next_face = FACE_ORDER[n]
-            self.scan_hint.config(
-                text="Face {}/6 — {} — Appuie sur SCANNER".format(
-                    n + 1, FACE_LABELS[next_face]))
+        if self.cam.open():
+            self._log("Camera ouverte au demarrage", "info")
         else:
-            self.scan_hint.config(
-                text="✓  6 faces capturées — Lance RÉSOUDRE",
-                fg=C_GREEN)
-            self._log("6 faces capturées, prêt à résoudre", "ok")
+            self._log("Avertissement : camera non disponible", "error")
 
-    def _reset_scan(self):
-        self._scan_idx = 0
-        self.faces = {}
-        self.cube_view.reset()
-        self.faces_lbl.config(text="Faces capturées : 0 / 6")
-        self.scan_hint.config(
-            text="Face 1/6 — {} — Appuie sur SCANNER".format(
-                FACE_LABELS[FACE_ORDER[0]]),
-            fg=C_CYAN)
-        self._log("Scan recommencé", "dim")
+        self._update_camera_tk()
 
-    # Bluetooth
+    def _build_ui(self):
+        top = tk.Frame(self.root, bg=BG2, pady=6, padx=10)
+        top.pack(fill="x")
 
-    def _toggle_bt(self):
+        tk.Label(top, text="PORT COM", bg=BG2, fg=FG, font=FONT_B).pack(side="left")
+        self.port_var = tk.StringVar()
+        self.port_combo = ttk.Combobox(top, textvariable=self.port_var,
+                                       width=12, state="readonly")
+        self.port_combo.pack(side="left", padx=(4, 2))
+        tk.Button(top, text="⟳", command=self._refresh_ports,
+                  bg=ACCENT, fg=FG, font=FONT, bd=0, padx=6).pack(side="left", padx=2)
+
+        self.btn_connect = tk.Button(top, text="Connecter", command=self._toggle_connect,
+                                     bg=GREEN, fg="black", font=FONT_B, bd=0, padx=12)
+        self.btn_connect.pack(side="left", padx=6)
+
+        self.lbl_bt = tk.Label(top, text="● Deconnecte", bg=BG2, fg=RED, font=FONT_B)
+        self.lbl_bt.pack(side="left", padx=10)
+
+        rf = tk.Frame(top, bg=BG2)
+        rf.pack(side="right")
+        tk.Label(rf, text="RFID :", bg=BG2, fg=FG, font=FONT_B).pack(side="left")
+        self.lbl_rfid_icon = tk.Label(rf, text="●", bg=BG2, fg=RED, font=FONT_BIG)
+        self.lbl_rfid_icon.pack(side="left", padx=2)
+        self.lbl_rfid_id = tk.Label(rf, text="Aucun badge", bg=BG2, fg=FG, font=FONT)
+        self.lbl_rfid_id.pack(side="left", padx=4)
+
+        main = tk.Frame(self.root, bg=BG)
+        main.pack(fill="both", expand=True, padx=8, pady=6)
+
+        left = tk.Frame(main, bg=BG)
+        left.pack(side="left", fill="y", padx=(0, 6))
+
+        tk.Label(left, text="ETAT DU CUBE", bg=BG, fg=BLUE_L, font=FONT_BIG).pack(pady=(4, 2))
+        self.cube_view = CubeView(left, cell_size=30, on_change=self._on_sticker_edit)
+        self.cube_view.pack(pady=4)
+
+        tf = tk.Frame(left, bg=BG2, padx=14, pady=8)
+        tf.pack(pady=4, fill="x")
+        tk.Label(tf, text="TEMPS DE RESOLUTION", bg=BG2, fg=FG, font=FONT_B).pack()
+        self.lbl_timer = tk.Label(tf, text="00:00.0", bg=BG2, fg=GREEN, font=FONT_TIME)
+        self.lbl_timer.pack()
+
+        kf = tk.Frame(left, bg="#1b2838", padx=10, pady=6,
+                      highlightbackground=ORANGE, highlightthickness=1)
+        kf.pack(fill="x", pady=4)
+        kf.pack_propagate(False)
+        kf.configure(height=160)
+
+        tk.Label(kf, text="SOLUTION KOCIEMBA", bg="#1b2838", fg=ORANGE, font=FONT_BIG).pack(anchor="w")
+        self.lbl_kociemba_string = tk.Label(kf, text="—", bg="#1b2838", fg="#80cbc4",
+                                            font=("Consolas", 9), anchor="w")
+        self.lbl_kociemba_string.pack(anchor="w", pady=(2, 0))
+        self.lbl_solution = tk.Label(kf, text="En attente du scan...", bg="#1b2838", fg=FG,
+                                     font=("Consolas", 11, "bold"), wraplength=380, justify="left")
+        self.lbl_solution.pack(anchor="w", pady=2)
+        self.lbl_nb_moves = tk.Label(kf, text="", bg="#1b2838", fg=BLUE_L, font=FONT)
+        self.lbl_nb_moves.pack(anchor="w")
+
+        self.lbl_progress = tk.Label(left, text="", bg=BG, fg=BLUE_L, font=FONT_B)
+        self.lbl_progress.pack(pady=2)
+        self.lbl_scan = tk.Label(left, text="", bg=BG, fg=BLUE_L, font=FONT_B)
+        self.lbl_scan.pack(pady=2)
+
+        center = tk.Frame(main, bg=BG)
+        center.pack(side="left", fill="both", expand=True, padx=4)
+
+        cam_header = tk.Frame(center, bg=BG)
+        cam_header.pack(fill="x")
+        tk.Label(cam_header, text="CAMERA EN DIRECT", bg=BG, fg=BLUE_L, font=FONT_BIG).pack(side="left", pady=(4, 2))
+        self.lbl_cam_status = tk.Label(cam_header, text="● Inactive", bg=BG, fg=RED, font=FONT_B)
+        self.lbl_cam_status.pack(side="right", padx=8)
+
+        self.camera_label = tk.Label(center, bg="#0d1117",
+                                     text="Camera en cours d'initialisation..." if PIL_AVAILABLE
+                                     else "Installer Pillow :\npip install Pillow",
+                                     fg="#555", font=FONT)
+        self.camera_label.pack(fill="both", expand=True, pady=2)
+
+        right = tk.Frame(main, bg=BG, width=300)
+        right.pack(side="right", fill="y", padx=(6, 0))
+        right.pack_propagate(False)
+
+        tk.Label(right, text="CONTROLES", bg=BG, fg=BLUE_L, font=FONT_BIG).pack(pady=(4, 6))
+
+        self.btn_auto = tk.Button(right, text="🚀  Scanner + Resoudre",
+                                  command=self._start_auto,
+                                  bg="#00897b", fg="white", font=FONT_B,
+                                  bd=0, padx=10, pady=10, width=22)
+        self.btn_auto.pack(pady=4)
+
+        ttk.Separator(right, orient="horizontal").pack(fill="x", pady=4)
+
+        self.btn_solve = tk.Button(right, text="🧩  Resoudre",
+                                   command=self._solve_and_send,
+                                   bg="#2e7d32", fg="white", font=FONT_B,
+                                   bd=0, padx=10, pady=8, width=22)
+        self.btn_solve.pack(pady=3)
+
+        ttk.Separator(right, orient="horizontal").pack(fill="x", pady=4)
+
+        gf = tk.Frame(right, bg=BG)
+        gf.pack(pady=3)
+        tk.Button(gf, text="✊ Attraper", command=lambda: self._send("GRAB"),
+                  bg=ORANGE, fg="black", font=FONT_B, bd=0, padx=10, pady=6,
+                  width=10).pack(side="left", padx=3)
+        tk.Button(gf, text="🖐 Relacher", command=lambda: self._send("RELEASE"),
+                  bg=PURPLE, fg="white", font=FONT_B, bd=0, padx=10, pady=6,
+                  width=10).pack(side="left", padx=3)
+
+        ttk.Separator(right, orient="horizontal").pack(fill="x", pady=4)
+
+        tk.Label(right, text="LOG", bg=BG, fg=FG, font=FONT_B).pack(anchor="w")
+        self.log_text = tk.Text(right, height=12, bg="#0d1117", fg="#8b949e",
+                                font=("Consolas", 9), bd=0, wrap="word",
+                                insertbackground=FG)
+        self.log_text.pack(fill="both", expand=True, pady=4)
+
+        self.log_text.tag_configure("tx",      foreground="#ff9100")
+        self.log_text.tag_configure("rx",      foreground="#66bb6a")
+        self.log_text.tag_configure("info",    foreground="#448aff")
+        self.log_text.tag_configure("error",   foreground="#ff1744")
+        self.log_text.tag_configure("success", foreground="#00c853")
+        self.log_text.tag_configure("solve",   foreground="#80cbc4")
+
+        self._refresh_ports()
+
+    def _refresh_ports(self):
+        ports = list_ports()
+        self.port_combo["values"] = ports
+        if ports:
+            self.port_combo.current(0)
+
+    def _update_camera_tk(self):
+        try:
+            if PIL_AVAILABLE and self.cam.is_opened():
+                frame_rgb = self.cam.get_frame_rgb()
+                if frame_rgb is not None:
+                    lw = self.camera_label.winfo_width()
+                    lh = self.camera_label.winfo_height()
+                    if lw > 10 and lh > 10:
+                        h, w = frame_rgb.shape[:2]
+                        scale = min(lw / w, lh / h)
+                        nw, nh = max(1, int(w * scale)), max(1, int(h * scale))
+                        img = Image.fromarray(frame_rgb)
+                        img = img.resize((nw, nh), Image.LANCZOS)
+                        photo = ImageTk.PhotoImage(img)
+                        self.camera_label.config(image=photo, text="")
+                        self.camera_label.image = photo
+                self.lbl_cam_status.config(text="● Active", fg=GREEN)
+            elif not PIL_AVAILABLE:
+                self.lbl_cam_status.config(text="● Pillow manquant", fg=ORANGE)
+            else:
+                self.lbl_cam_status.config(text="● Inactive", fg=RED)
+        except Exception:
+            pass
+        self.root.after(50, self._update_camera_tk)
+
+    def _log(self, msg, tag=None):
+        ts = time.strftime("%H:%M:%S")
+        full = "[{}] {}".format(ts, msg)
+        print(full)
+        self.log_text.insert("end", full + "\n", tag)
+        self.log_text.see("end")
+
+    def _toggle_connect(self):
         if self.bt.is_connected():
             self.bt.disconnect()
-            self._dot_c.itemconfig(self._dot, fill=C_DIM)
-            self._dot_lbl.config(text="OFFLINE", fg=C_DIM)
-            self.conn_btn.config(text="⬡  CONNECTER", fg=C_GREEN)
-            self._log("Déconnecté", "dim")
+            self.btn_connect.config(text="Connecter", bg=GREEN)
+            self.lbl_bt.config(text="● Deconnecte", fg=RED)
+            self._log("Bluetooth deconnecte", "info")
         else:
             port = self.port_var.get()
-            try:
-                baud = int(self.baud_var.get())
-                self.bt.connect(port, baud)
-            except Exception as e:
-                messagebox.showerror("Connexion", str(e))
+            if not port:
+                messagebox.showwarning("Port", "Selectionne un port COM")
                 return
-            self.bt.on_receive = self._on_bt
-            self._dot_c.itemconfig(self._dot, fill=C_GREEN)
-            self._dot_lbl.config(
-                text="ONLINE  " + port, fg=C_GREEN)
-            self.conn_btn.config(
-                text="⬡  DÉCONNECTER", fg=C_RED)
-            self._log("Connecté {} @ {}".format(port, baud), "ok")
+            try:
+                self.bt.connect(port)
+                self.btn_connect.config(text="Deconnecter", bg=RED)
+                self.lbl_bt.config(text="● Connecte ({})".format(port), fg=GREEN)
+                self._log("Bluetooth connecte sur {}".format(port), "success")
+            except Exception as e:
+                messagebox.showerror("Erreur", str(e))
+                self._log("Erreur connexion: {}".format(e), "error")
 
     def _send(self, tag, payload=""):
-        if not self.bt.is_connected():
-            messagebox.showwarning("BT", "Non connecté")
-            return
         try:
             self.bt.send(tag, payload)
-            self._log("> {} {}".format(tag, payload), "tx")
+            display = payload if len(payload) < 60 else payload[:60] + "..."
+            self._log("TX -> {} : {}".format(tag, display), "tx")
         except Exception as e:
-            messagebox.showerror("Envoi", str(e))
+            self._log("ERREUR envoi: {}".format(e), "error")
 
-    def _on_bt(self, tag, payload):
-        self.root.after(0, lambda t=tag, p=payload:
-                        self._handle_bt(t, p))
+    def _poll_bt(self):
+        while not self.bt.rx_queue.empty():
+            line, tag, payload = self.bt.rx_queue.get_nowait()
+            if tag:
+                self._log("RX <- {} : {}".format(tag, payload), "rx")
+            self._handle_rx(tag, payload)
+        self.root.after(80, self._poll_bt)
 
-    def _handle_bt(self, tag, payload):
-        self._log("< {} {}".format(tag, payload))
+    def _handle_rx(self, tag, payload):
+        if tag is None:
+            return
 
-        if tag == "PROG":
-            try:
-                done, total = map(int, payload.split("/"))
-                w = self._prog_cv.winfo_width() or 250
-                self._prog_cv.coords(
-                    self._prog_rect, 0, 0,
-                    int(w * done / total), 8)
-                self.prog_lbl.config(
-                    text="Move {}/{}".format(done, total))
-            except:
-                pass
-
-        elif tag == "DONE" and payload == "MOVE":
-            w = self._prog_cv.winfo_width() or 250
-            self._prog_cv.coords(self._prog_rect, 0, 0, w, 8)
-            self.prog_lbl.config(text="✓  Terminé")
-            self._timer_stop()
-            self._log("Résolution terminée !", "ok")
+        if tag == "PONG":
+            self._log("PONG recu — connexion OK", "success")
 
         elif tag == "AUTH":
-            parts   = payload.split(",")
-            card_id = parts[0]
-            ok      = len(parts) > 1 and parts[1] == "1"
-            self.rfid_id.config(text=card_id)
-            if ok:
-                self.rfid_status.config(text="AUTORISÉ", fg=C_GREEN)
-                self._set_badge(
-                    "✓  ACCÈS AUTORISÉ — " + card_id,
-                    C_GREEN, "#001a0d")
-                self._log("RFID autorisé : {}".format(card_id), "ok")
-            else:
-                self.rfid_status.config(text="REFUSÉ", fg=C_RED)
-                self._set_badge("✗  ACCÈS REFUSÉ", C_RED, "#1a0005")
-                self._log("RFID refusé : {}".format(card_id), "err")
+            parts = payload.split(",")
+            if len(parts) == 2:
+                card_id, auth = parts
+                self.rfid_id = card_id
+                self.rfid_status = auth == "1"
+                if self.rfid_status:
+                    self.lbl_rfid_icon.config(fg=GREEN)
+                    self.lbl_rfid_id.config(text="Badge autorise  ID: {}".format(card_id), fg=GREEN)
+                    self._log("RFID Badge autorise — ID: {}".format(card_id), "success")
+                else:
+                    self.lbl_rfid_icon.config(fg=RED)
+                    self.lbl_rfid_id.config(text="Badge refuse  ID: {}".format(card_id), fg=RED)
+                    self._log("RFID Badge refuse — ID: {}".format(card_id), "error")
+
+        elif tag == "SCAN_READY":
+            face_name = payload.strip()
+            self._log("Face {} — capture dans {}s...".format(face_name, AUTO_CAPTURE_DELAY), "info")
+            self.lbl_scan.config(text="Face {} — capture dans {}s...".format(face_name, AUTO_CAPTURE_DELAY))
+            self.cam._current_face = face_name
+            threading.Thread(target=self._capture_face_auto, args=(face_name,), daemon=True).start()
+
+        elif tag == "SCAN_DONE":
+            self.scanning = False
+            n = len(self.captured_faces)
+            self.lbl_scan.config(text="Scan termine — {}/6 faces".format(n))
+            self._log("== SCAN TERMINE — {}/6 faces ==".format(n), "success")
+            if n == 6:
+                try:
+                    kstr = build_kociemba_string(self.captured_faces)
+                    self.lbl_kociemba_string.config(text="Cube string : {}".format(kstr))
+                    self._log("Chaine Kociemba : {}".format(kstr), "solve")
+                except Exception as e:
+                    self._log("Erreur construction chaine: {}".format(e), "error")
+            self.cam._status_text = "RESOLUTION EN COURS"
+            self.root.after(500, self._solve_and_send)
+
+        elif tag == "AUTO_START":
+            self._log("Bouton physique presse -> demarrage auto", "info")
+            self._start_auto()
+
+        elif tag == "PROG":
+            parts = payload.split("/")
+            if len(parts) == 2:
+                try:
+                    idx = int(parts[0]) - 1
+                    total = int(parts[1])
+                    if 0 <= idx < len(self.solution_moves):
+                        mvt = self.solution_moves[idx]
+                        self.cube_state.apply_move(mvt)
+                        self._refresh_cube_view()
+                        self.move_index = idx + 1
+                        self.lbl_progress.config(
+                            text="Mouvement {}/{} : {}".format(idx + 1, total, mvt))
+                        self._log("Mouvement {}/{} : {} OK".format(idx + 1, total, mvt), "info")
+                        self.cam._status_text = "RESOLUTION {}/{} - {}".format(idx + 1, total, mvt)
+                except Exception:
+                    pass
+
+        elif tag == "DONE":
+            self.solving = False
+            self._stop_timer()
+            self.cam._status_text = "TERMINE - Resolu en {:.1f}s".format(self.timer_elapsed)
+            self.lbl_progress.config(text="Resolution terminee !")
+            self.lbl_scan.config(text="")
+            self._log("== RESOLU en {:.1f}s ==".format(self.timer_elapsed), "success")
+            self._enable_buttons()
 
         elif tag == "ERR":
-            self._log("Erreur : {}".format(payload), "err")
+            self._log("ERREUR robot: {}".format(payload), "error")
+            self.lbl_scan.config(text="Erreur: {}".format(payload), fg=RED)
+            self.scanning = False
+            self.cam._status_text = "En attente"
+            self._enable_buttons()
 
-    # Solver
+        elif tag == "OK":
+            self._log("OK: {}".format(payload), "success")
 
-    def _solve(self):
-        if len(self.faces) != 6:
-            messagebox.showwarning("Solver",
-                "Capture les 6 faces d'abord")
+        elif tag == "LOG":
+            self._log("Pico: {}".format(payload), "rx")
+
+    def _start_auto(self):
+        if not self.bt.is_connected():
+            messagebox.showwarning("Bluetooth", "Connecte-toi au robot d'abord.")
             return
-        try:
-            from solver.cube_solver import solve
-            _, solution = solve(self.faces)
-            self.solution = solution
-            moves = solution.split()
-            self.sol_text.config(text=solution)
-            self.moves_lbl.config(
-                text="◈  {} mouvements".format(len(moves)))
-            self._prog_cv.coords(self._prog_rect, 0, 0, 0, 8)
-            self.prog_lbl.config(text="Prêt à envoyer")
-            self._log("Solution ({} moves) : {}".format(
-                len(moves), solution), "ok")
-        except Exception as e:
-            messagebox.showerror("Solver", str(e))
-            self._log("Erreur solver : {}".format(e), "err")
+        if not self.cam.is_opened():
+            if not self.cam.open():
+                messagebox.showerror("Camera", "Impossible d'ouvrir la camera.")
+                return
 
-    def _send_solution(self):
-        if not self.solution:
-            messagebox.showwarning("Solution",
-                "Résous d'abord le cube")
+        self._log("== DEMARRAGE SCAN AUTOMATIQUE ==", "info")
+        self.captured_faces = {}
+        self.cam.reset_scan()
+        self.cube_view.reset()
+        self.scanning = True
+        self.lbl_scan.config(text="Scan auto en cours...")
+        self.lbl_solution.config(text="En attente du scan...", fg=FG)
+        self.lbl_kociemba_string.config(text="—")
+        self.lbl_nb_moves.config(text="")
+        self.lbl_progress.config(text="")
+        self.timer_elapsed = 0.0
+        self._disable_buttons()
+        self._send("START_SCAN")
+
+    def _capture_face_auto(self, face_name):
+        for i in range(AUTO_CAPTURE_DELAY, 0, -1):
+            self.root.after(0, lambda n=i, fn=face_name: self.lbl_scan.config(
+                text="Face {} — capture dans {}s...".format(fn, n)))
+            time.sleep(1)
+
+        colors = self.cam.snapshot_face(face_name)
+
+        if colors and "?" not in colors:
+            self.captured_faces[face_name] = list(colors)
+            self.root.after(0, lambda fn=face_name, c=list(colors): self._on_face_scanned(fn, c))
+            self._send("SCAN_ACK", face_name)
+            self._log("Face {} capturee : {}".format(face_name, colors), "success")
+        else:
+            self._log("Face {} — echec detection, nouvelle tentative...".format(face_name), "error")
+            time.sleep(1)
+            colors = self.cam.snapshot_face(face_name)
+            if colors:
+                self.captured_faces[face_name] = list(colors)
+                self.root.after(0, lambda fn=face_name, c=list(colors): self._on_face_scanned(fn, c))
+            else:
+                self.root.after(0, lambda fn=face_name: self.lbl_scan.config(
+                    text="Face {} — detection echouee, corrigez manuellement".format(fn)))
+            self._send("SCAN_ACK", face_name)
+
+    def _on_sticker_edit(self, face_name, idx, new_color):
+        if face_name not in self.captured_faces:
+            self.captured_faces[face_name] = ["?"] * 9
+        self.captured_faces[face_name][idx] = new_color
+        self._log("Edition : {} [{}] -> {}".format(face_name, idx, new_color), "info")
+
+    def _on_face_scanned(self, face_name, colors):
+        self.cube_view.update_face(face_name, colors)
+        self.lbl_scan.config(text="Faces scannees : {}/6".format(len(self.captured_faces)))
+
+    def _solve_and_send(self):
+        if len(self.captured_faces) < 6:
+            self.lbl_solution.config(
+                text="Il manque des faces ({}/6).\nCorrigez les couleurs et reessayez.".format(
+                    len(self.captured_faces)), fg=ORANGE)
+            self._enable_buttons()
             return
         if not self.bt.is_connected():
-            messagebox.showwarning("BT", "Non connecté")
+            messagebox.showwarning("Bluetooth", "Connecte-toi au robot.")
+            self._enable_buttons()
             return
-        self._prog_cv.coords(self._prog_rect, 0, 0, 0, 8)
-        self.prog_lbl.config(text="Envoi en cours...")
-        self._send("MOVE", self.solution)
-        self._timer_reset()
-        self._timer_start()
 
-    # Timer
+        self._log("Calcul de la solution Kociemba...", "info")
+        try:
+            cube_string, solution = solve(self.captured_faces)
+            self.solution_str = solution
+            self.solution_moves = solution.strip().split()
+            self.move_index = 0
+            nb = len(self.solution_moves)
 
-    def _timer_start(self):
-        if not self.timer_running:
-            self.timer_start = time.time() - self.elapsed
-            self.timer_running = True
+            self.lbl_kociemba_string.config(text="Cube string : {}".format(cube_string))
+            self.lbl_solution.config(text=solution, fg=FG)
+            self.lbl_nb_moves.config(text="{} mouvements".format(nb))
+            self.lbl_progress.config(text="0/{}".format(nb))
 
-    def _timer_stop(self):
-        if self.timer_running:
-            self.elapsed = time.time() - self.timer_start
-            self.timer_running = False
+            self._log("CUBE STRING  : {}".format(cube_string), "solve")
+            self._log("SOLUTION     : {}".format(solution), "solve")
+            self._log("NB MOUVEMENTS: {}".format(nb), "solve")
 
-    def _timer_reset(self):
+            self.cube_state.set_faces(self.captured_faces)
+            self._refresh_cube_view()
+
+            self.solving = True
+            self._disable_buttons()
+            self._start_timer()
+            self._log("Envoi des mouvements au robot...", "info")
+            self._send("MOVE", solution)
+
+        except Exception as e:
+            self._log("ERREUR Kociemba: {}".format(e), "error")
+            self.lbl_solution.config(
+                text="Scan invalide — Cliquez sur les cases pour corriger\npuis appuyez sur Resoudre",
+                fg=RED)
+            self.lbl_nb_moves.config(text="")
+            self.cam._status_text = "En attente"
+            self._enable_buttons()
+
+    def _start_timer(self):
+        self.timer_start = time.time()
+        self.timer_running = True
+
+    def _stop_timer(self):
         self.timer_running = False
-        self.elapsed = 0
-        self.timer_lbl.config(text="00:00.0")
+        self.timer_elapsed = time.time() - self.timer_start
 
-    def _update_timer(self):
-        t = ((time.time() - self.timer_start)
-             if self.timer_running else self.elapsed)
-        m = int(t) // 60
-        s = t % 60
-        self.timer_lbl.config(
-            text="{:02d}:{:04.1f}".format(m, s))
+    def _update_timer_display(self):
+        elapsed = time.time() - self.timer_start if self.timer_running else self.timer_elapsed
+        mins = int(elapsed // 60)
+        secs = elapsed % 60
+        self.lbl_timer.config(text="{:02d}:{:04.1f}".format(mins, secs))
+        self.root.after(100, self._update_timer_display)
 
-    # Log
+    def _refresh_cube_view(self):
+        for fn in FACE_ORDER:
+            self.cube_view.update_face(fn, self.cube_state.faces[fn])
 
-    def _log(self, text, style=""):
-        ts = time.strftime("%H:%M:%S")
-        self.log.config(state="normal")
-        self.log.insert("end",
-                        "[{}] {}\n".format(ts, text), style)
-        self.log.see("end")
-        self.log.config(state="disabled")
+    def _disable_buttons(self):
+        for b in (self.btn_auto, self.btn_solve):
+            b.config(state="disabled")
 
-    def _poll(self):
-        while not self.bt.rx_queue.empty():
-            _, tag, payload = self.bt.rx_queue.get_nowait()
-            if tag:
-                self._handle_bt(tag, payload)
-        self._update_timer()
-        self.root.after(100, self._poll)
-
-    def run(self):
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
-        self.root.mainloop()
-
-    def _on_close(self):
-        self._cam_alive = False
-        if self._cap:
-            self._cap.release()
-        self.bt.disconnect()
-        self.root.destroy()
+    def _enable_buttons(self):
+        for b in (self.btn_auto, self.btn_solve):
+            b.config(state="normal")
 
 
 def run_app():
-    Interface().run()
+    root = tk.Tk()
+    root.title("Robot Rubik's Cube")
+    root.configure(bg="#0a0a18")
+    root.geometry("{}x{}+0+0".format(root.winfo_screenwidth(), root.winfo_screenheight()))
+    root.state("zoomed")
+    SplashScreen(root, on_done=lambda: App(root))
+    root.mainloop()
 
 
 if __name__ == "__main__":

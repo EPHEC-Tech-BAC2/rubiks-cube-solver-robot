@@ -23,3 +23,4 @@ Initialisation du projet et mise en place des bases logicielles et matérielles 
 - Utilisation de l'écran OLED pour afficher l’état et les messages du robot.
 - Lecture de badges RFID pour l’identification.
 - Mise en place de l’application Tkinter avec l’affichage du cube, la caméra live, le Bluetooth, le RFID, le chronomètre et le journal d’événements.
+- Ajout du flux de capture des 6 faces du cube, la détection des couleurs, l’actualisation de l’état du cube à l’écran et la construction de la chaîne de résolution Kociemba.
