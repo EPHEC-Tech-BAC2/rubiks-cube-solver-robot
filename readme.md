@@ -24,3 +24,10 @@ Initialisation du projet et mise en place des bases logicielles et matérielles 
 - Lecture de badges RFID pour l’identification.
 - Mise en place de l’application Tkinter avec l’affichage du cube, la caméra live, le Bluetooth, le RFID, le chronomètre et le journal d’événements.
 - Ajout du flux de capture des 6 faces du cube, la détection des couleurs, l’actualisation de l’état du cube à l’écran et la construction de la chaîne de résolution Kociemba.
+- Passer le lancement par un écran d’accueil.
+- Afficher le retour caméra directement dans l’interface.
+- Construire la chaîne Kociemba après le scan complet.
+- Calculer et afficher la solution du cube.
+- Envoyer automatiquement les mouvements au robot.
+- Mettre à jour l’état du cube pendant l’exécution des mouvements.
+- Gérer la progression de la résolution en live.

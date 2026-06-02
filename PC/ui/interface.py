@@ -2,10 +2,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
 import time
-import math
 import sys
 import os
-from pathlib import Path
 
 try:
     from PIL import Image, ImageTk
@@ -38,74 +36,6 @@ FONT_MONO = ("Consolas", 10)
 FONT_TIME = ("Consolas", 22, "bold")
 
 AUTO_CAPTURE_DELAY = 5
-
-
-class SplashScreen:
-    def __init__(self, root, on_done):
-        self.root = root
-        self.on_done = on_done
-        self._angle = 0
-        self._prog = 0.0
-        self._phase = 0
-
-        self.frame = tk.Frame(root, bg="#0a0a18")
-        self.frame.place(relx=0, rely=0, relwidth=1, relheight=1)
-        self.canvas = tk.Canvas(self.frame, bg="#0a0a18", highlightthickness=0)
-        self.canvas.pack(fill="both", expand=True)
-        self._tick()
-
-    def _tick(self):
-        self._angle += 1.8
-        if self._phase == 0:
-            self._prog = min(1.0, self._prog + 0.012)
-            if self._prog >= 1.0:
-                self._phase = 1
-                self.frame.after(700, lambda: setattr(self, "_phase", 2))
-        elif self._phase == 2:
-            self._prog = max(0.0, self._prog - 0.07)
-            if self._prog <= 0:
-                self.frame.destroy()
-                self.on_done()
-                return
-        self._draw()
-        self.frame.after(16, self._tick)
-
-    def _draw(self):
-        c = self.canvas
-        c.delete("all")
-        w = self.root.winfo_width() or 1400
-        h = self.root.winfo_height() or 800
-        cx, cy = w // 2, h // 2
-
-        for x in range(0, w, 50):
-            c.create_line(x, 0, x, h, fill="#101020")
-        for y in range(0, h, 50):
-            c.create_line(0, y, w, y, fill="#101020")
-
-        for i, (col, wd) in enumerate([(BLUE_L, 2), (ORANGE, 1), ("#1e1e30", 1)]):
-            r = 110 + i * 55
-            a = self._angle + i * 40
-            x1 = cx + r * math.cos(math.radians(a))
-            y1 = cy + r * math.sin(math.radians(a))
-            c.create_oval(cx-r, cy-r, cx+r, cy+r, outline=col, width=wd)
-            if i < 2:
-                c.create_oval(x1-6, y1-6, x1+6, y1+6, fill=col, outline="")
-
-        c.create_text(cx, cy - 40, text="RUBIK",
-                      font=("Segoe UI", 54, "bold"), fill=BLUE_L)
-        c.create_text(cx, cy + 30, text="ROBOT",
-                      font=("Segoe UI", 54, "bold"), fill=ORANGE)
-        c.create_text(cx, cy + 100, text="CONTROL SYSTEM",
-                      font=("Segoe UI", 14), fill="#778")
-
-        bw = 460
-        bx = cx - bw // 2
-        by = cy + 155
-        c.create_rectangle(bx, by, bx + bw, by + 5, fill="#1c1c2c", outline="#2d2d40")
-        c.create_rectangle(bx, by, bx + int(bw * self._prog), by + 5, fill=BLUE_L, outline="")
-        c.create_text(cx, by + 18,
-                      text="INITIALISATION... {}%".format(int(self._prog * 100)),
-                      font=("Segoe UI", 9), fill="#667")
 
 
 class App:
@@ -150,15 +80,13 @@ class App:
         tk.Label(top, text="PORT COM", bg=BG2, fg=FG, font=FONT_B).pack(side="left")
         self.port_var = tk.StringVar()
         self.port_combo = ttk.Combobox(top, textvariable=self.port_var,
-                                       width=12, state="readonly")
+                                        width=12, state="readonly")
         self.port_combo.pack(side="left", padx=(4, 2))
         tk.Button(top, text="⟳", command=self._refresh_ports,
                   bg=ACCENT, fg=FG, font=FONT, bd=0, padx=6).pack(side="left", padx=2)
-
         self.btn_connect = tk.Button(top, text="Connecter", command=self._toggle_connect,
-                                     bg=GREEN, fg="black", font=FONT_B, bd=0, padx=12)
+                                      bg=GREEN, fg="black", font=FONT_B, bd=0, padx=12)
         self.btn_connect.pack(side="left", padx=6)
-
         self.lbl_bt = tk.Label(top, text="● Deconnecte", bg=BG2, fg=RED, font=FONT_B)
         self.lbl_bt.pack(side="left", padx=10)
 
@@ -194,10 +122,10 @@ class App:
 
         tk.Label(kf, text="SOLUTION KOCIEMBA", bg="#1b2838", fg=ORANGE, font=FONT_BIG).pack(anchor="w")
         self.lbl_kociemba_string = tk.Label(kf, text="—", bg="#1b2838", fg="#80cbc4",
-                                            font=("Consolas", 9), anchor="w")
+                                             font=("Consolas", 9), anchor="w")
         self.lbl_kociemba_string.pack(anchor="w", pady=(2, 0))
         self.lbl_solution = tk.Label(kf, text="En attente du scan...", bg="#1b2838", fg=FG,
-                                     font=("Consolas", 11, "bold"), wraplength=380, justify="left")
+                                      font=("Consolas", 11, "bold"), wraplength=380, justify="left")
         self.lbl_solution.pack(anchor="w", pady=2)
         self.lbl_nb_moves = tk.Label(kf, text="", bg="#1b2838", fg=BLUE_L, font=FONT)
         self.lbl_nb_moves.pack(anchor="w")
@@ -217,9 +145,9 @@ class App:
         self.lbl_cam_status.pack(side="right", padx=8)
 
         self.camera_label = tk.Label(center, bg="#0d1117",
-                                     text="Camera en cours d'initialisation..." if PIL_AVAILABLE
-                                     else "Installer Pillow :\npip install Pillow",
-                                     fg="#555", font=FONT)
+                                      text="Camera en cours d'initialisation..." if PIL_AVAILABLE
+                                           else "Installer Pillow :\npip install Pillow",
+                                      fg="#555", font=FONT)
         self.camera_label.pack(fill="both", expand=True, pady=2)
 
         right = tk.Frame(main, bg=BG, width=300)
@@ -229,17 +157,17 @@ class App:
         tk.Label(right, text="CONTROLES", bg=BG, fg=BLUE_L, font=FONT_BIG).pack(pady=(4, 6))
 
         self.btn_auto = tk.Button(right, text="🚀  Scanner + Resoudre",
-                                  command=self._start_auto,
-                                  bg="#00897b", fg="white", font=FONT_B,
-                                  bd=0, padx=10, pady=10, width=22)
+                                   command=self._start_auto,
+                                   bg="#00897b", fg="white", font=FONT_B,
+                                   bd=0, padx=10, pady=10, width=22)
         self.btn_auto.pack(pady=4)
 
         ttk.Separator(right, orient="horizontal").pack(fill="x", pady=4)
 
         self.btn_solve = tk.Button(right, text="🧩  Resoudre",
-                                   command=self._solve_and_send,
-                                   bg="#2e7d32", fg="white", font=FONT_B,
-                                   bd=0, padx=10, pady=8, width=22)
+                                    command=self._solve_and_send,
+                                    bg="#2e7d32", fg="white", font=FONT_B,
+                                    bd=0, padx=10, pady=8, width=22)
         self.btn_solve.pack(pady=3)
 
         ttk.Separator(right, orient="horizontal").pack(fill="x", pady=4)
@@ -257,8 +185,8 @@ class App:
 
         tk.Label(right, text="LOG", bg=BG, fg=FG, font=FONT_B).pack(anchor="w")
         self.log_text = tk.Text(right, height=12, bg="#0d1117", fg="#8b949e",
-                                font=("Consolas", 9), bd=0, wrap="word",
-                                insertbackground=FG)
+                                 font=("Consolas", 9), bd=0, wrap="word",
+                                 insertbackground=FG)
         self.log_text.pack(fill="both", expand=True, pady=4)
 
         self.log_text.tag_configure("tx",      foreground="#ff9100")
@@ -269,12 +197,6 @@ class App:
         self.log_text.tag_configure("solve",   foreground="#80cbc4")
 
         self._refresh_ports()
-
-    def _refresh_ports(self):
-        ports = list_ports()
-        self.port_combo["values"] = ports
-        if ports:
-            self.port_combo.current(0)
 
     def _update_camera_tk(self):
         try:
@@ -307,6 +229,12 @@ class App:
         print(full)
         self.log_text.insert("end", full + "\n", tag)
         self.log_text.see("end")
+
+    def _refresh_ports(self):
+        ports = list_ports()
+        self.port_combo["values"] = ports
+        if ports:
+            self.port_combo.current(0)
 
     def _toggle_connect(self):
         if self.bt.is_connected():
@@ -421,7 +349,7 @@ class App:
 
         elif tag == "ERR":
             self._log("ERREUR robot: {}".format(payload), "error")
-            self.lbl_scan.config(text="Erreur: {}".format(payload), fg=RED)
+            self.lbl_scan.config(text="Erreur: {}".format(payload), fg=C_RED)
             self.scanning = False
             self.cam._status_text = "En attente"
             self._enable_buttons()
@@ -532,7 +460,7 @@ class App:
             self._log("ERREUR Kociemba: {}".format(e), "error")
             self.lbl_solution.config(
                 text="Scan invalide — Cliquez sur les cases pour corriger\npuis appuyez sur Resoudre",
-                fg=RED)
+                fg=C_RED)
             self.lbl_nb_moves.config(text="")
             self.cam._status_text = "En attente"
             self._enable_buttons()
@@ -565,13 +493,101 @@ class App:
             b.config(state="normal")
 
 
+class WelcomePage:
+    BG_DARK  = "#0a0a18"
+    FG_TITLE = "#ffffff"
+    FG_SUB   = "#9090b0"
+    FG_HINT  = "#3a3a5c"
+    BTN_BG   = "#00897b"
+    BTN_HOV  = "#00695c"
+    CUBE_COLORS = ["#ffffff", "#ff1744", "#00c853", "#ffd600", "#ff9100", "#448aff"]
+
+    def __init__(self, root, on_launch):
+        self.root = root
+        self.on_launch = on_launch
+        self._build()
+
+    def _build(self):
+        f = tk.Frame(self.root, bg=self.BG_DARK)
+        f.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self._frame = f
+
+        bar = tk.Frame(f, height=10, bg=self.BG_DARK)
+        bar.pack(fill="x", side="top")
+        for c in self.CUBE_COLORS:
+            tk.Frame(bar, bg=c, height=10).pack(side="left", fill="x", expand=True)
+
+        bot = tk.Frame(f, height=6, bg=self.BG_DARK)
+        bot.pack(fill="x", side="bottom")
+        for c in reversed(self.CUBE_COLORS):
+            tk.Frame(bot, bg=c, height=6).pack(side="left", fill="x", expand=True)
+
+        center = tk.Frame(f, bg=self.BG_DARK)
+        center.place(relx=0.5, rely=0.5, anchor="center")
+
+        cube_frame = tk.Frame(center, bg=self.BG_DARK)
+        cube_frame.pack(pady=(0, 20))
+        MINI = [
+            ["#ff1744","#ff9100","#ffd600"],
+            ["#00c853","#ffffff","#448aff"],
+            ["#448aff","#ffd600","#ff1744"],
+        ]
+        for row in MINI:
+            r = tk.Frame(cube_frame, bg=self.BG_DARK)
+            r.pack()
+            for color in row:
+                tk.Frame(r, bg=color, width=28, height=28,
+                         highlightbackground="#0a0a18",
+                         highlightthickness=2).pack(side="left")
+
+        tk.Label(center, text="ROBOT RUBIK'S CUBE",
+                 bg=self.BG_DARK, fg=self.FG_TITLE,
+                 font=("Segoe UI", 40, "bold")).pack(pady=(12, 4))
+
+        tk.Label(center, text="Systeme de resolution automatique",
+                 bg=self.BG_DARK, fg=self.FG_SUB,
+                 font=("Segoe UI", 16)).pack()
+
+        sep = tk.Frame(center, bg=self.BG_DARK)
+        sep.pack(pady=20)
+        for c in self.CUBE_COLORS:
+            tk.Frame(sep, bg=c, width=60, height=4).pack(side="left", padx=3)
+
+        btn = tk.Button(center,
+                        text="   🚀   LANCER L'APPLICATION   ",
+                        command=self._launch,
+                        bg=self.BTN_BG, fg="white",
+                        font=("Segoe UI", 18, "bold"),
+                        bd=0, padx=28, pady=18,
+                        cursor="hand2",
+                        activebackground=self.BTN_HOV,
+                        activeforeground="white",
+                        relief="flat")
+        btn.pack(pady=10)
+        btn.bind("<Enter>", lambda e: btn.config(bg=self.BTN_HOV))
+        btn.bind("<Leave>", lambda e: btn.config(bg=self.BTN_BG))
+
+        tk.Label(center, text="HC-05 Bluetooth  •  MicroPython",
+                 bg=self.BG_DARK, fg=self.FG_HINT,
+                 font=("Segoe UI", 11)).pack(pady=(18, 0))
+
+        tk.Label(f, text="v6.0  •  2026", bg=self.BG_DARK, fg=self.FG_HINT,
+                 font=("Segoe UI", 10)).place(relx=1.0, rely=1.0, anchor="se", x=-18, y=-16)
+
+    def _launch(self):
+        self._frame.destroy()
+        self.on_launch()
+
+
 def run_app():
     root = tk.Tk()
     root.title("Robot Rubik's Cube")
     root.configure(bg="#0a0a18")
-    root.geometry("{}x{}+0+0".format(root.winfo_screenwidth(), root.winfo_screenheight()))
+    sw = root.winfo_screenwidth()
+    sh = root.winfo_screenheight()
+    root.geometry("{}x{}+0+0".format(sw, sh))
     root.state("zoomed")
-    SplashScreen(root, on_done=lambda: App(root))
+    WelcomePage(root, on_launch=lambda: App(root))
     root.mainloop()
 
 
