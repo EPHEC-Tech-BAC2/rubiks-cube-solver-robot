@@ -5,14 +5,17 @@ import time
 import sys
 import os
 
+# Pillow sert à afficher les images de la caméra dans Tkinter
 try:
     from PIL import Image, ImageTk
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
 
+# Ajout du dossier parent pour importer les modules du projet
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Import des modules du projet
 from bluetooth.bt_uart import BTUart, list_ports
 from graphique.cube_view import CubeView
 from vision.camera import OverheadCamera
@@ -20,6 +23,7 @@ from vision.color_detection import FACE_ORDER, build_kociemba_string
 from solver.cube_solver import solve
 from solver.cube_simulator import CubeState
 
+# Couleurs et styles de l'interface
 BG        = "#1a1a2e"
 BG2       = "#16213e"
 FG        = "#e0e0e0"
@@ -35,19 +39,24 @@ FONT_BIG  = ("Segoe UI", 14, "bold")
 FONT_MONO = ("Consolas", 10)
 FONT_TIME = ("Consolas", 22, "bold")
 
+# Temps avant capture automatique d'une face
 AUTO_CAPTURE_DELAY = 5
 
 
 class App:
     def __init__(self, root):
+        # Fenêtre principale
         self.root = root
         self.root.title("Robot Rubik's Cube — Controle")
         self.root.configure(bg=BG)
         self.root.minsize(1200, 720)
 
+        # Outils du projet
         self.bt = BTUart()
         self.cam = OverheadCamera()
         self.cube_state = CubeState()
+
+        # Données de scan et de résolution
         self.captured_faces = {}
         self.solution_moves = []
         self.solution_str = ""
@@ -55,25 +64,31 @@ class App:
         self.scanning = False
         self.move_index = 0
 
+        # Timer de résolution
         self.timer_running = False
         self.timer_start = 0
         self.timer_elapsed = 0.0
 
+        # RFID
         self.rfid_id = "—"
         self.rfid_status = False
 
+        # Création de l'interface
         self._build_ui()
         self._poll_bt()
         self._update_timer_display()
 
+        # Ouverture de la caméra au démarrage
         if self.cam.open():
             self._log("Camera ouverte au demarrage", "info")
         else:
             self._log("Avertissement : camera non disponible", "error")
 
+        # Mise à jour continue de l'affichage caméra
         self._update_camera_tk()
 
     def _build_ui(self):
+        # Barre du haut : Bluetooth + RFID
         top = tk.Frame(self.root, bg=BG2, pady=6, padx=10)
         top.pack(fill="x")
 
@@ -90,6 +105,7 @@ class App:
         self.lbl_bt = tk.Label(top, text="● Deconnecte", bg=BG2, fg=RED, font=FONT_B)
         self.lbl_bt.pack(side="left", padx=10)
 
+        # Zone RFID
         rf = tk.Frame(top, bg=BG2)
         rf.pack(side="right")
         tk.Label(rf, text="RFID :", bg=BG2, fg=FG, font=FONT_B).pack(side="left")
@@ -98,9 +114,11 @@ class App:
         self.lbl_rfid_id = tk.Label(rf, text="Aucun badge", bg=BG2, fg=FG, font=FONT)
         self.lbl_rfid_id.pack(side="left", padx=4)
 
+        # Zone principale
         main = tk.Frame(self.root, bg=BG)
         main.pack(fill="both", expand=True, padx=8, pady=6)
 
+        # Colonne gauche : cube + temps + solution
         left = tk.Frame(main, bg=BG)
         left.pack(side="left", fill="y", padx=(0, 6))
 
@@ -108,12 +126,14 @@ class App:
         self.cube_view = CubeView(left, cell_size=30, on_change=self._on_sticker_edit)
         self.cube_view.pack(pady=4)
 
+        # Temps de résolution
         tf = tk.Frame(left, bg=BG2, padx=14, pady=8)
         tf.pack(pady=4, fill="x")
         tk.Label(tf, text="TEMPS DE RESOLUTION", bg=BG2, fg=FG, font=FONT_B).pack()
         self.lbl_timer = tk.Label(tf, text="00:00.0", bg=BG2, fg=GREEN, font=FONT_TIME)
         self.lbl_timer.pack()
 
+        # Solution Kociemba
         kf = tk.Frame(left, bg="#1b2838", padx=10, pady=6,
                       highlightbackground=ORANGE, highlightthickness=1)
         kf.pack(fill="x", pady=4)
@@ -130,11 +150,13 @@ class App:
         self.lbl_nb_moves = tk.Label(kf, text="", bg="#1b2838", fg=BLUE_L, font=FONT)
         self.lbl_nb_moves.pack(anchor="w")
 
+        # Messages de progression
         self.lbl_progress = tk.Label(left, text="", bg=BG, fg=BLUE_L, font=FONT_B)
         self.lbl_progress.pack(pady=2)
         self.lbl_scan = tk.Label(left, text="", bg=BG, fg=BLUE_L, font=FONT_B)
         self.lbl_scan.pack(pady=2)
 
+        # Zone centrale : caméra
         center = tk.Frame(main, bg=BG)
         center.pack(side="left", fill="both", expand=True, padx=4)
 
@@ -150,6 +172,7 @@ class App:
                                       fg="#555", font=FONT)
         self.camera_label.pack(fill="both", expand=True, pady=2)
 
+        # Zone droite : commandes
         right = tk.Frame(main, bg=BG, width=300)
         right.pack(side="right", fill="y", padx=(6, 0))
         right.pack_propagate(False)
@@ -172,6 +195,7 @@ class App:
 
         ttk.Separator(right, orient="horizontal").pack(fill="x", pady=4)
 
+        # Boutons robot
         gf = tk.Frame(right, bg=BG)
         gf.pack(pady=3)
         tk.Button(gf, text="✊ Attraper", command=lambda: self._send("GRAB"),
@@ -183,12 +207,14 @@ class App:
 
         ttk.Separator(right, orient="horizontal").pack(fill="x", pady=4)
 
+        # Zone log
         tk.Label(right, text="LOG", bg=BG, fg=FG, font=FONT_B).pack(anchor="w")
         self.log_text = tk.Text(right, height=12, bg="#0d1117", fg="#8b949e",
                                  font=("Consolas", 9), bd=0, wrap="word",
                                  insertbackground=FG)
         self.log_text.pack(fill="both", expand=True, pady=4)
 
+        # Couleurs du texte du log
         self.log_text.tag_configure("tx",      foreground="#ff9100")
         self.log_text.tag_configure("rx",      foreground="#66bb6a")
         self.log_text.tag_configure("info",    foreground="#448aff")
@@ -196,9 +222,11 @@ class App:
         self.log_text.tag_configure("success", foreground="#00c853")
         self.log_text.tag_configure("solve",   foreground="#80cbc4")
 
+        # Liste des ports disponibles
         self._refresh_ports()
 
     def _update_camera_tk(self):
+        # Mise à jour de l'image caméra dans l'interface
         try:
             if PIL_AVAILABLE and self.cam.is_opened():
                 frame_rgb = self.cam.get_frame_rgb()
@@ -224,6 +252,7 @@ class App:
         self.root.after(50, self._update_camera_tk)
 
     def _log(self, msg, tag=None):
+        # Ajout d'un message avec heure dans le log
         ts = time.strftime("%H:%M:%S")
         full = "[{}] {}".format(ts, msg)
         print(full)
@@ -231,12 +260,14 @@ class App:
         self.log_text.see("end")
 
     def _refresh_ports(self):
+        # Recherche des ports série disponibles
         ports = list_ports()
         self.port_combo["values"] = ports
         if ports:
             self.port_combo.current(0)
 
     def _toggle_connect(self):
+        # Connexion ou déconnexion Bluetooth
         if self.bt.is_connected():
             self.bt.disconnect()
             self.btn_connect.config(text="Connecter", bg=GREEN)
@@ -257,6 +288,7 @@ class App:
                 self._log("Erreur connexion: {}".format(e), "error")
 
     def _send(self, tag, payload=""):
+        # Envoi d'une commande au robot
         try:
             self.bt.send(tag, payload)
             display = payload if len(payload) < 60 else payload[:60] + "..."
@@ -265,6 +297,7 @@ class App:
             self._log("ERREUR envoi: {}".format(e), "error")
 
     def _poll_bt(self):
+        # Lecture continue des messages reçus
         while not self.bt.rx_queue.empty():
             line, tag, payload = self.bt.rx_queue.get_nowait()
             if tag:
@@ -273,6 +306,7 @@ class App:
         self.root.after(80, self._poll_bt)
 
     def _handle_rx(self, tag, payload):
+        # Traitement des messages reçus du robot
         if tag is None:
             return
 
@@ -349,7 +383,7 @@ class App:
 
         elif tag == "ERR":
             self._log("ERREUR robot: {}".format(payload), "error")
-            self.lbl_scan.config(text="Erreur: {}".format(payload), fg=C_RED)
+            self.lbl_scan.config(text="Erreur: {}".format(payload), fg=RED)
             self.scanning = False
             self.cam._status_text = "En attente"
             self._enable_buttons()
@@ -361,6 +395,7 @@ class App:
             self._log("Pico: {}".format(payload), "rx")
 
     def _start_auto(self):
+        # Début du scan automatique
         if not self.bt.is_connected():
             messagebox.showwarning("Bluetooth", "Connecte-toi au robot d'abord.")
             return
@@ -384,6 +419,7 @@ class App:
         self._send("START_SCAN")
 
     def _capture_face_auto(self, face_name):
+        # Compte à rebours puis capture de la face
         for i in range(AUTO_CAPTURE_DELAY, 0, -1):
             self.root.after(0, lambda n=i, fn=face_name: self.lbl_scan.config(
                 text="Face {} — capture dans {}s...".format(fn, n)))
@@ -409,16 +445,19 @@ class App:
             self._send("SCAN_ACK", face_name)
 
     def _on_sticker_edit(self, face_name, idx, new_color):
+        # Correction manuelle d'une case du cube
         if face_name not in self.captured_faces:
             self.captured_faces[face_name] = ["?"] * 9
         self.captured_faces[face_name][idx] = new_color
         self._log("Edition : {} [{}] -> {}".format(face_name, idx, new_color), "info")
 
     def _on_face_scanned(self, face_name, colors):
+        # Mise à jour visuelle après scan d'une face
         self.cube_view.update_face(face_name, colors)
         self.lbl_scan.config(text="Faces scannees : {}/6".format(len(self.captured_faces)))
 
     def _solve_and_send(self):
+        # Calcul de la solution puis envoi au robot
         if len(self.captured_faces) < 6:
             self.lbl_solution.config(
                 text="Il manque des faces ({}/6).\nCorrigez les couleurs et reessayez.".format(
@@ -460,20 +499,23 @@ class App:
             self._log("ERREUR Kociemba: {}".format(e), "error")
             self.lbl_solution.config(
                 text="Scan invalide — Cliquez sur les cases pour corriger\npuis appuyez sur Resoudre",
-                fg=C_RED)
+                fg=RED)
             self.lbl_nb_moves.config(text="")
             self.cam._status_text = "En attente"
             self._enable_buttons()
 
     def _start_timer(self):
+        # Démarre le chronomètre
         self.timer_start = time.time()
         self.timer_running = True
 
     def _stop_timer(self):
+        # Arrête le chronomètre
         self.timer_running = False
         self.timer_elapsed = time.time() - self.timer_start
 
     def _update_timer_display(self):
+        # Affichage du temps en continu
         elapsed = time.time() - self.timer_start if self.timer_running else self.timer_elapsed
         mins = int(elapsed // 60)
         secs = elapsed % 60
@@ -481,19 +523,23 @@ class App:
         self.root.after(100, self._update_timer_display)
 
     def _refresh_cube_view(self):
+        # Met à jour la vue du cube avec l'état actuel
         for fn in FACE_ORDER:
             self.cube_view.update_face(fn, self.cube_state.faces[fn])
 
     def _disable_buttons(self):
+        # Bloque les boutons pendant une action importante
         for b in (self.btn_auto, self.btn_solve):
             b.config(state="disabled")
 
     def _enable_buttons(self):
+        # Réactive les boutons
         for b in (self.btn_auto, self.btn_solve):
             b.config(state="normal")
 
 
 class WelcomePage:
+    # Couleurs de l'écran d'accueil
     BG_DARK  = "#0a0a18"
     FG_TITLE = "#ffffff"
     FG_SUB   = "#9090b0"
@@ -508,23 +554,28 @@ class WelcomePage:
         self._build()
 
     def _build(self):
+        # Fond de la page d'accueil
         f = tk.Frame(self.root, bg=self.BG_DARK)
         f.place(relx=0, rely=0, relwidth=1, relheight=1)
         self._frame = f
 
+        # Bande colorée en haut
         bar = tk.Frame(f, height=10, bg=self.BG_DARK)
         bar.pack(fill="x", side="top")
         for c in self.CUBE_COLORS:
             tk.Frame(bar, bg=c, height=10).pack(side="left", fill="x", expand=True)
 
+        # Bande colorée en bas
         bot = tk.Frame(f, height=6, bg=self.BG_DARK)
         bot.pack(fill="x", side="bottom")
         for c in reversed(self.CUBE_COLORS):
             tk.Frame(bot, bg=c, height=6).pack(side="left", fill="x", expand=True)
 
+        # Contenu centré
         center = tk.Frame(f, bg=self.BG_DARK)
         center.place(relx=0.5, rely=0.5, anchor="center")
 
+        # Petit dessin du cube
         cube_frame = tk.Frame(center, bg=self.BG_DARK)
         cube_frame.pack(pady=(0, 20))
         MINI = [
@@ -553,6 +604,7 @@ class WelcomePage:
         for c in self.CUBE_COLORS:
             tk.Frame(sep, bg=c, width=60, height=4).pack(side="left", padx=3)
 
+        # Bouton de lancement
         btn = tk.Button(center,
                         text="   🚀   LANCER L'APPLICATION   ",
                         command=self._launch,
@@ -575,11 +627,13 @@ class WelcomePage:
                  font=("Segoe UI", 10)).place(relx=1.0, rely=1.0, anchor="se", x=-18, y=-16)
 
     def _launch(self):
+        # Ouvre la page principale
         self._frame.destroy()
         self.on_launch()
 
 
 def run_app():
+    # Démarrage de la fenêtre principale
     root = tk.Tk()
     root.title("Robot Rubik's Cube")
     root.configure(bg="#0a0a18")
