@@ -31,3 +31,4 @@ Initialisation du projet et mise en place des bases logicielles et matérielles 
 - Envoyer automatiquement les mouvements au robot.
 - Mettre à jour l’état du cube pendant l’exécution des mouvements.
 - Gérer la progression de la résolution en live.
+- version finale de la communication BT, interface PC, OLED et RFID.

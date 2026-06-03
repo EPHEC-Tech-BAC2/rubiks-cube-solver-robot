@@ -29,7 +29,7 @@ class BTUart:
         self._thread = None
         self._alive = False
         self.rx_queue = queue.Queue()
-        self.on_receive = None
+        self.on_receive = None  # callback(tag, payload)
 
     def connect(self, port, baud=38400):
         self.disconnect()
@@ -45,7 +45,7 @@ class BTUart:
         if self.ser and self.ser.is_open:
             try:
                 self.ser.close()
-            except:
+            except Exception:
                 pass
         self.ser = None
 
@@ -53,11 +53,6 @@ class BTUart:
         if not self.is_connected():
             raise RuntimeError("Non connecté")
         self.ser.write(make_msg(tag, payload).encode())
-
-    def send_raw(self, text):
-        if not self.is_connected():
-            raise RuntimeError("Non connecté")
-        self.ser.write((text + "\n").encode())
 
     def is_connected(self):
         return self.ser is not None and self.ser.is_open
@@ -76,7 +71,7 @@ class BTUart:
                 if self.on_receive and tag:
                     try:
                         self.on_receive(tag, payload)
-                    except:
+                    except Exception:
                         pass
-            except:
+            except Exception:
                 time.sleep(0.1)
