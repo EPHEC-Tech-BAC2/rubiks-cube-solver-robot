@@ -1,297 +1,132 @@
-# Fichier : PC/vision/face_capture.py
-# Membre 3 - branch : vision-solver
-# Capture les 6 faces du cube et envoie le résultat au solveur Kociemba
-
-import cv2
 import numpy as np
-import sys
-from pathlib import Path
 
-# Permet d'importer PC/solver/cube_solver.py
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-
-from solver.cube_solver import solve_from_faces 
-
-# --------- Réglages caméra ----------
-CAMERA_INDEX = 1   # change en 0, 1, 2 ou 3 si besoin
-
-# --------- Zone de
-# 
-# lecture 3x3 ----------
-X1, Y1, X2, Y2 = 160, 80, 400, 320
-SQ = (X2 - X1) // 3
-
-# --------- Ordre demandé par Kociemba ----------
+# ordre des faces pour la chaine Kociemba
 FACE_ORDER = ["U", "R", "F", "D", "L", "B"]
-FACE_LABELS = {
-    "U": "Up / Haut",
-    "R": "Right / Droite",
-    "F": "Front / Avant",
-    "D": "Down / Bas",
-    "L": "Left / Gauche",
-    "B": "Back / Arriere",
-}
 
-# Couleurs d'affichage (BGR pour OpenCV)
-DISPLAY = {
+# couleurs BGR pour OpenCV (affichage sur l image camera)
+DISPLAY_BGR = {
     "Blanc":  (240, 240, 240),
     "Rouge":  (0,   0,   220),
-    "Vert":   (0,   200,  0),
+    "Vert":   (0,   200,  0 ),
     "Jaune":  (0,   220, 220),
     "Orange": (0,   120, 255),
-    "Bleu":   (220,  0,   0),
+    "Bleu":   (210,  0,   0 ),
 }
 
-def grid_centers():
-    pts = []
-    for r in range(3):
-        for c in range(3):
-            cx = X1 + c * SQ + SQ // 2
-            cy = Y1 + r * SQ + SQ // 2
-            pts.append((cx, cy))
-    return pts
+# couleurs hex pour Tkinter (affichage dans l interface)
+DISPLAY_HEX = {
+    "Blanc":  "#f0f0f0",
+    "Rouge":  "#dc0000",
+    "Vert":   "#00c800",
+    "Jaune":  "#dcdc00",
+    "Orange": "#ff7800",
+    "Bleu":   "#0000dc",
+    "?":      "#444444",
+}
 
+# mettre True pour afficher les valeurs HSV dans la console (debug)
+DEBUG_HSV = False
+
+
+# distance entre deux teintes sur le cercle chromatique (H de 0 a 180 en OpenCV)
 def circular_hue_distance(h1, h2):
     d = abs(h1 - h2)
     return min(d, 180 - d)
 
-def detect_color_hsv(hsv_pixel):
-    h, s, v = int(hsv_pixel[0]), int(hsv_pixel[1]), int(hsv_pixel[2])
 
-    # Blanc
+# detecte la couleur d un pixel a partir de ses valeurs HSV
+# orange est verifie AVANT rouge pour eviter les confusions
+def detect_color(h, s, v):
+    # blanc : peu de saturation et bien lumineux
     if s < 60 and v > 170:
         return "Blanc"
 
-    # Orange
+    # orange : teinte entre 6 et 22
     if 6 <= h <= 22 and s > 100 and v > 80:
         return "Orange"
 
-    # Jaune
+    # jaune : teinte entre 23 et 38
     if 23 <= h <= 38 and s > 80 and v > 80:
         return "Jaune"
 
-    # Vert
+    # vert : teinte entre 39 et 85
     if 39 <= h <= 85 and s > 70 and v > 50:
         return "Vert"
 
-    # Bleu
+    # bleu : teinte entre 95 et 135
     if 95 <= h <= 135 and s > 70 and v > 50:
         return "Bleu"
 
-    # Rouge
+    # rouge : teinte tres basse ou tres haute (entoure le 0/180)
     if ((0 <= h <= 5) or (170 <= h <= 179)) and s > 90 and v > 50:
         return "Rouge"
 
-    # fallback
+    # si rien ne correspond, prend la couleur la plus proche par distance de teinte
     centres = {
-        "Rouge": 0,
+        "Rouge":  0,
         "Orange": 14,
-        "Jaune": 30,
-        "Vert": 60,
-        "Bleu": 115,
+        "Jaune":  30,
+        "Vert":   60,
+        "Bleu":   115,
     }
+    best = min(centres, key=lambda n: circular_hue_distance(h, centres[n]))
 
-    best_name = "Blanc"
-    best_dist = 999
+    if DEBUG_HSV:
+        print("[FALLBACK] H={} S={} V={} -> {}".format(h, s, v, best))
 
-    for name, hc in centres.items():
-        d = circular_hue_distance(h, hc)
-        if d < best_dist:
-            best_dist = d
-            best_name = name
+    return best
 
-    return best_name
 
-def detect_face_hsv(frame_hsv, centers):
+# detecte les 9 couleurs d une face a partir de l image HSV
+def detect_face_colors(frame_hsv, centers, face_name="?"):
     h_img, w_img = frame_hsv.shape[:2]
     result = []
 
-    for (px, py) in centers:
-        x0 = max(0, px - 8)
-        x1 = min(w_img, px + 9)
-        y0 = max(0, py - 8)
-        y1 = min(h_img, py + 9)
+    if DEBUG_HSV:
+        print("\n--- Detection face {} ---".format(face_name))
 
+    for idx, (px, py) in enumerate(centers):
+        # echantillon de 8x8 pixels autour du centre de chaque case
+        x0, x1 = max(0, px - 8), min(w_img, px + 9)
+        y0, y1 = max(0, py - 8), min(h_img, py + 9)
         patch = frame_hsv[y0:y1, x0:x1]
 
         if patch.size == 0:
             result.append("?")
             continue
 
-        med_h = int(np.median(patch[:, :, 0]))
-        med_s = int(np.median(patch[:, :, 1]))
-        med_v = int(np.median(patch[:, :, 2]))
+        # prend la valeur mediane pour ignorer les pixels parasites
+        h = int(np.median(patch[:, :, 0]))
+        s = int(np.median(patch[:, :, 1]))
+        v = int(np.median(patch[:, :, 2]))
 
-        color_name = detect_color_hsv((med_h, med_s, med_v))
-        result.append(color_name)
+        color = detect_color(h, s, v)
+        result.append(color)
+
+        if DEBUG_HSV:
+            pos = ["TL", "TM", "TR", "ML", "CC", "MR", "BL", "BM", "BR"]
+            tag = pos[idx] if idx < 9 else str(idx)
+            marker = " <<<" if color in ("Rouge", "Orange") else ""
+            print("  [{}] H={:3d}  S={:3d}  V={:3d}  -> {:7s}{}".format(
+                tag, h, s, v, color, marker))
 
     return result
 
-def draw_grid(frame, centers, colors):
-    cv2.rectangle(frame, (X1, Y1), (X2, Y2), (0, 255, 150), 2)
 
-    for idx, (px, py) in enumerate(centers):
-        c = idx % 3
-        r = idx // 3
-        rx0, ry0 = X1 + c * SQ, Y1 + r * SQ
-        rx1, ry1 = rx0 + SQ, ry0 + SQ
-
-        name = colors[idx] if idx < len(colors) else "?"
-        fill = DISPLAY.get(name, (100, 100, 100))
-
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (rx0, ry0), (rx1, ry1), fill, -1)
-        cv2.addWeighted(overlay, 0.4, frame, 0.6, 0, frame)
-
-        cv2.rectangle(frame, (rx0, ry0), (rx1, ry1), (200, 200, 200), 1)
-        cv2.circle(frame, (px, py), 4, (255, 255, 255), -1)
-
-        cv2.putText(
-            frame,
-            name[:3],
-            (rx0 + 4, ry0 + 20),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.45,
-            (255, 255, 255),
-            1
-        )
-
-    return frame
-
-def is_face_valid(colors):
-    if len(colors) != 9:
-        return False
-    if "?" in colors:
-        return False
-    return True
-
-def save_faces_to_file(faces, filename="faces_result.txt"):
-    with open(filename, "w", encoding="utf-8") as f:
-        for face_name in FACE_ORDER:
-            f.write(f"{face_name}: {faces[face_name]}\n")
-
-def main():
-    cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_DSHOW)
-
-    if not cap.isOpened():
-        print("Caméra introuvable. Essaie CAMERA_INDEX = 0, 1, 2 ou 3.")
-        return
-
-    centers = grid_centers()
-    faces = {}
-    current_face_index = 0
-
-    print("Ordre de capture : U, R, F, D, L, B")
-    print("C = capturer la face courante")
-    print("R = recommencer toutes les faces")
-    print("Q = quitter")
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("Impossible de lire l'image caméra.")
-            break
-
-        frame_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        colors = detect_face_hsv(frame_hsv, centers)
-
-        display_frame = frame.copy()
-        display_frame = draw_grid(display_frame, centers, colors)
-
-        if current_face_index < len(FACE_ORDER):
-            current_face_name = FACE_ORDER[current_face_index]
-            current_face_label = FACE_LABELS[current_face_name]
-            info_text = f"Face a capturer : {current_face_name} ({current_face_label})"
-        else:
-            info_text = "Toutes les faces sont capturees"
-
-        cv2.putText(
-            display_frame,
-            info_text,
-            (10, 25),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (0, 255, 150),
-            2
-        )
-
-        cv2.putText(
-            display_frame,
-            "C=capturer  R=reset  Q=quitter",
-            (10, 50),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (0, 255, 150),
-            1
-        )
-
-        y_text = 80
-        for face_name in FACE_ORDER:
-            status = "OK" if face_name in faces else "--"
-            cv2.putText(
-                display_frame,
-                f"{face_name}: {status}",
-                (10, y_text),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (255, 255, 255),
-                1
-            )
-            y_text += 20
-
-        cv2.imshow("Face Capture HSV", display_frame)
-
-        key = cv2.waitKey(1) & 0xFF
-
-        if key == ord('q'):
-            break
-
-        if key == ord('r'):
-            faces = {}
-            current_face_index = 0
-            print("Toutes les captures ont ete reinitialisees.")
-
-        if key == ord('c'):
-            if current_face_index >= len(FACE_ORDER):
-                print("Les 6 faces sont deja capturees. Appuie sur R pour recommencer.")
-                continue
-
-            if not is_face_valid(colors):
-                print("Face invalide. Detection incomplete.")
-                continue
-
-            face_name = FACE_ORDER[current_face_index]
-            faces[face_name] = colors.copy()
-
-            print(f"Face {face_name} capturee : {faces[face_name]}")
-            current_face_index += 1
-
-            if current_face_index == len(FACE_ORDER):
-                print("\nToutes les faces ont ete capturees.")
-                save_faces_to_file(faces)
-
-                try:
-                    cube_string, solution = solve_from_faces(faces)
-
-                    print("Cube string :", cube_string)
-                    print("Solution :", solution)
-
-                    with open("cube_solution.txt", "w", encoding="utf-8") as f:
-                        f.write("Faces capturees :\n")
-                        for fn in FACE_ORDER:
-                            f.write(f"{fn}: {faces[fn]}\n")
-                        f.write("\n")
-                        f.write(f"Cube string : {cube_string}\n")
-                        f.write(f"Solution : {solution}\n")
-
-                    print("Resultat sauvegarde dans cube_solution.txt")
-
-                except Exception as e:
-                    print("Erreur solveur :", e)
-                    print("Verifie l'ordre des faces et les couleurs detectees.")
-
-    cap.release()
-    cv2.destroyAllWindows()
-
-if __name__ == "__main__":
-    main()
+# construit la chaine de 54 caracteres pour l algorithme Kociemba
+# chaque lettre correspond a une face (U R F D L B)
+def build_kociemba_string(faces):
+    # les centres des faces definissent quelle couleur = quelle face
+    color_to_face = {faces[f][4]: f for f in FACE_ORDER}
+    cube_string = ""
+    for face_name in FACE_ORDER:
+        stickers = faces[face_name]
+        if len(stickers) != 9:
+            raise ValueError("La face {} n'a pas 9 cases".format(face_name))
+        for color in stickers:
+            if color not in color_to_face:
+                raise ValueError("Couleur inconnue : {}".format(color))
+            cube_string += color_to_face[color]
+    if len(cube_string) != 54:
+        raise ValueError("Chaine de {} caracteres au lieu de 54".format(len(cube_string)))
+    return cube_string
